@@ -129,13 +129,27 @@ export async function processMT5SyncPayload(
   const syncedAt = new Date().toISOString();
   const { account, positions = [], deals = [] } = payload;
 
+  if (account.data_mode !== 'MT5' || account.connection_status !== 'CONNECTED') {
+    return {
+      success: false,
+      message: 'Only an authenticated, real MT5 connector snapshot can create or update a dashboard account.',
+      account_id: accountId,
+      account_number: account.account_number || 0,
+      positions_synced: 0,
+      deals_synced: 0,
+      trades_created_or_updated: 0,
+      synced_at: syncedAt,
+      error: 'UNVERIFIED_MT5_DATA_REJECTED',
+    };
+  }
+
   const logicalTrades = aggregateDealsToLogicalTrades(deals, accountId);
 
   if (isDatabaseConnected()) {
     try {
       // 1. Resolve or create account in trading_accounts table
-      const dbAcc = await query<{ id: string }>(
-        `SELECT id FROM trading_accounts 
+      const dbAcc = await query<{ id: string; mt5_data_verified: boolean }>(
+        `SELECT id, mt5_data_verified FROM trading_accounts
          WHERE (CASE WHEN $1 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN id = $1::uuid ELSE FALSE END)
             OR account_number = $2 LIMIT 1`,
         [accountId, account.account_number]
@@ -147,12 +161,14 @@ export async function processMT5SyncPayload(
         await query(
           `UPDATE trading_accounts
            SET current_balance = $1,
+               starting_balance = CASE WHEN mt5_data_verified IS TRUE THEN starting_balance ELSE $1 END,
                current_equity = $2,
                credit = $3,
                margin = $4,
                free_margin = $5,
                margin_level = $6,
                connection_status = 'CONNECTED',
+               mt5_data_verified = TRUE,
                last_synced_at = $7,
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $8`,
@@ -167,12 +183,41 @@ export async function processMT5SyncPayload(
             targetDbId,
           ]
         );
+        if (!dbAcc!.rows[0].mt5_data_verified) {
+          await query(
+            `UPDATE prop_firm_accounts
+             SET daily_loss_limit = $1 * daily_loss_percent / 100,
+                 max_loss_limit = $1 * max_loss_percent / 100,
+                 current_daily_drawdown = 0,
+                 current_max_drawdown = 0,
+                 peak_watermark = $1,
+                 breach_status = 'SAFE',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE trading_account_id = $2`,
+            [account.balance, targetDbId]
+          );
+          await query(
+            `UPDATE prop_phases
+             SET starting_balance = $1,
+                 profit_target_amount = $1 * profit_target_percent / 100,
+                 pass_threshold = $1 * (1 + profit_target_percent / 100),
+                 current_profit = 0,
+                 progress_percentage = 0,
+                 remaining_target = $1 * profit_target_percent / 100,
+                 phase_status = 'IN_PROGRESS',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE prop_firm_account_id IN (
+               SELECT id FROM prop_firm_accounts WHERE trading_account_id = $2
+             )`,
+            [account.balance, targetDbId]
+          );
+        }
       } else {
         const newAcc = await query<{ id: string }>(
           `INSERT INTO trading_accounts (
             account_name, account_number, broker_name, server_name, starting_balance,
-            current_balance, current_equity, free_margin, connection_status, last_synced_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONNECTED', $9)
+            current_balance, current_equity, free_margin, connection_status, mt5_data_verified, last_synced_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONNECTED', TRUE, $9)
           RETURNING id`,
           [
             `${account.broker_name} #${account.account_number}`,

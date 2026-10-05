@@ -100,6 +100,7 @@ class InMemoryStore {
         free_margin: accountSnapshot.free_margin || accountSnapshot.balance,
         margin_level: accountSnapshot.margin_level || 0,
         connection_status: 'CONNECTED',
+        mt5_data_verified: true,
         bridge_protocol: 'PYTHON_CONNECTOR',
         is_active: true,
       };
@@ -118,6 +119,7 @@ class InMemoryStore {
       free_margin: accountSnapshot.free_margin || accountSnapshot.balance,
       margin_level: accountSnapshot.margin_level || 0,
       connection_status: 'CONNECTED',
+      mt5_data_verified: true,
       last_synced_at: new Date().toISOString(),
       positions_count: positions.length,
       trades_count: logicalTrades.length,

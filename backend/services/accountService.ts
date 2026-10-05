@@ -37,12 +37,14 @@ export async function getAccounts(): Promise<TradingAccountRecord[]> {
        FROM trading_accounts a
        LEFT JOIN prop_firm_accounts p ON p.trading_account_id = a.id
        LEFT JOIN prop_phases ph ON ph.prop_firm_account_id = p.id
+       WHERE a.mt5_data_verified IS TRUE
        ORDER BY a.created_at ASC`
     );
     return res ? res.rows : [];
   }
 
-  return inMemoryStore.getAllAccounts();
+  const accounts = await inMemoryStore.getAllAccounts();
+  return accounts.filter((account) => account.mt5_data_verified === true);
 }
 
 export async function getAccountById(id: string): Promise<TradingAccountRecord | null> {
@@ -77,13 +79,14 @@ export async function getAccountById(id: string): Promise<TradingAccountRecord |
        FROM trading_accounts a
        LEFT JOIN prop_firm_accounts p ON p.trading_account_id = a.id
        LEFT JOIN prop_phases ph ON ph.prop_firm_account_id = p.id
-       WHERE a.id = $1`,
+       WHERE a.id = $1 AND a.mt5_data_verified IS TRUE`,
       [id]
     );
     return res && res.rows.length > 0 ? res.rows[0] : null;
   }
 
-  return inMemoryStore.getAccount(id);
+  const account = await inMemoryStore.getAccount(id);
+  return account?.mt5_data_verified ? account : null;
 }
 
 export async function createAccount(data: {

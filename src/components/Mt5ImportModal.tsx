@@ -31,7 +31,7 @@ export const Mt5ImportModal: React.FC<Mt5ImportModalProps> = ({
       const results = parseMt5ReportText(textToParse, activeAccount.id);
       if (results.length === 0) {
         setErrorMsg(
-          'Could not detect valid MT5 deal rows. Paste lines like: "928371, 2026.10.04 14:30, buy, 0.25, XAUUSD, 2654.20, +120.00"'
+          'No valid MT5 deal rows found. Check that the report includes ticket, time, type, volume, symbol, price, and profit.'
         );
       }
       setParsedPreview(results);
@@ -50,16 +50,6 @@ export const Mt5ImportModal: React.FC<Mt5ImportModalProps> = ({
       handleParse(content);
     };
     reader.readAsText(file);
-  };
-
-  const handleLoadSampleMt5Deals = () => {
-    const sample = `981241\t2026.10.04 11:24\tbuy\t0.25\tXAUUSD\t2654.20\t2663.80\t+120.00
-981238\t2026.10.04 09:15\tsell\t0.25\tXAUUSD\t2641.80\t2645.00\t-40.00
-981220\t2026.10.03 14:10\tbuy\t0.40\tEURUSD\t1.08420\t1.08640\t+88.00
-981205\t2026.10.02 15:45\tbuy\t0.25\tXAUUSD\t2632.50\t2640.50\t+100.00
-981190\t2026.10.01 13:30\tsell\t0.50\tUS100\t20410.0\t20338.0\t+72.00`;
-    setRawText(sample);
-    handleParse(sample);
   };
 
   const handleConfirmImport = () => {
@@ -120,13 +110,6 @@ export const Mt5ImportModal: React.FC<Mt5ImportModalProps> = ({
           >
             Upload MT5 Report File (.csv / .html)
           </button>
-          <button
-            type="button"
-            onClick={handleLoadSampleMt5Deals}
-            className="ml-auto px-3 py-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 text-cyan-300 font-label-tech text-[11px] font-semibold transition-all"
-          >
-            Insert Past Deals Template
-          </button>
         </div>
 
         {activeTab === 'paste' ? (
@@ -141,7 +124,7 @@ export const Mt5ImportModal: React.FC<Mt5ImportModalProps> = ({
                 setRawText(e.target.value);
                 handleParse(e.target.value);
               }}
-              placeholder={`Ticket\tTime\tType\tVolume\tSymbol\tPrice\tProfit\n981241\t2026.10.04 11:24\tbuy\t0.25\tXAUUSD\t2654.20\t+120.00`}
+              placeholder="Ticket    Time    Type    Volume    Symbol    Price    Profit"
               className="w-full bg-[#07090f] border border-white/10 rounded-xl p-3 font-mono text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
             />
           </div>

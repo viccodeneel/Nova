@@ -58,6 +58,13 @@ router.post('/sync-webhook', async (req: Request, res: Response) => {
       });
     }
 
+    if (account.data_mode !== 'MT5' || account.connection_status !== 'CONNECTED') {
+      return res.status(400).json({
+        success: false,
+        error: 'Only an authenticated, real MT5 connector snapshot can be synced',
+      });
+    }
+
     const targetAccountId = account_id || `acc-${account.account_number}`;
 
     const result = await processMT5SyncPayload(targetAccountId, {

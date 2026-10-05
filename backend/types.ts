@@ -11,6 +11,7 @@ export interface MT5AccountSnapshot {
   currency?: string;
   leverage?: number;
   connection_status?: 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+  data_mode?: 'MT5' | 'SIMULATED';
 }
 
 export interface MT5PositionSnapshot {
@@ -153,6 +154,7 @@ export interface TradingAccountRecord {
   free_margin: number;
   margin_level: number;
   connection_status: 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+  mt5_data_verified?: boolean;
   bridge_protocol: string;
   is_active: boolean;
   last_synced_at?: string;
