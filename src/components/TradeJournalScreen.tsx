@@ -10,7 +10,7 @@ interface TradeJournalScreenProps {
   onSelectTrade: (trade: TradeExecution | null) => void;
   onAddTrade: (trade: TradeExecution) => void;
   onDeleteTrade?: (tradeId: string) => void;
-  onSyncPastTrades?: (accountId: string, count?: number) => void;
+  onSyncPastTrades?: (accountId: string, count?: number) => Promise<void> | void;
   onOpenImportModal?: () => void;
 }
 
@@ -69,13 +69,14 @@ export const TradeJournalScreen: React.FC<TradeJournalScreenProps> = ({
   const currentFilteredAccount = accounts.find((a) => a.id === selectedAccountFilter);
   const targetSyncAccount = currentFilteredAccount || accounts.find((a) => a.id === activeAccountId) || accounts[0];
 
-  const handleSyncCurrentAccount = (count: number = 5) => {
+  const handleSyncCurrentAccount = async (count: number = 5) => {
     if (!targetSyncAccount || !onSyncPastTrades) return;
     setSyncing(true);
-    setTimeout(() => {
-      onSyncPastTrades(targetSyncAccount.id, count);
+    try {
+      await onSyncPastTrades(targetSyncAccount.id, count);
+    } finally {
       setSyncing(false);
-    }, 400);
+    }
   };
 
   const handleCreateTrade = (e: React.FormEvent) => {

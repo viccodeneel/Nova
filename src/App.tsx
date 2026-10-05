@@ -487,9 +487,7 @@ export default function App() {
   const handleSyncFromHeader = async (requestedAccountId?: string) => {
     setIsSyncing(true);
     try {
-      const res = requestedAccountId
-        ? await ApiClient.syncAccount(requestedAccountId)
-        : await ApiClient.syncMT5();
+      const res = await ApiClient.syncLocalConnector();
 
       if (res.success) {
         setLastSyncedTime(res.synced_at || new Date().toISOString());
@@ -998,7 +996,7 @@ export default function App() {
               onSelectTrade={setSelectedTrade}
               onAddTrade={handleAddTrade}
               onDeleteTrade={handleDeleteTrade}
-              onSyncPastTrades={(id) => void handleSyncFromHeader(id)}
+              onSyncPastTrades={(id) => handleSyncFromHeader(id)}
               onOpenImportModal={() => {
                 setTargetImportAccount(activeAccount);
                 setIsImportModalOpen(true);
@@ -1021,7 +1019,7 @@ export default function App() {
               }}
               onOpenConnectModal={() => setIsConnectAccountOpen(true)}
               onDeleteAccount={handleDeleteAccount}
-              onSyncPastTrades={(id) => void handleSyncFromHeader(id)}
+              onSyncPastTrades={(id) => handleSyncFromHeader(id)}
               onOpenImportModal={(acc) => {
                 setTargetImportAccount(acc);
                 setIsImportModalOpen(true);

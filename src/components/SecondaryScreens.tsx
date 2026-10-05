@@ -244,7 +244,7 @@ export const AccountsScreen: React.FC<{
   onSelectAccount: (id: string) => void;
   onOpenConnectModal: () => void;
   onDeleteAccount: (id: string) => void;
-  onSyncPastTrades: (id: string, count?: number) => void;
+  onSyncPastTrades: (id: string, count?: number) => Promise<void> | void;
   onOpenImportModal?: (account: PropAccount) => void;
   onNavigateToJournal?: (accountId?: string) => void;
 }> = ({
@@ -271,12 +271,13 @@ export const AccountsScreen: React.FC<{
     }
   };
 
-  const handleSyncDeals = (accId: string, count: number = 5) => {
+  const handleSyncDeals = async (accId: string, count: number = 5) => {
     setSyncingAccountId(accId);
-    setTimeout(() => {
-      onSyncPastTrades(accId);
+    try {
+      await onSyncPastTrades(accId, count);
+    } finally {
       setSyncingAccountId(null);
-    }, 400);
+    }
   };
 
   const inspectedTrades = inspectingAccount
