@@ -18,6 +18,7 @@ import {
 } from './components/SecondaryScreens';
 import { Mt5ImportModal } from './components/Mt5ImportModal';
 import { LoginScreen } from './components/LoginScreen';
+import { ConnectAccountScreen } from './components/ConnectAccountScreen';
 import { ApiClient } from './services/apiClient.ts';
 
 const NOVA_LOGO_URL =
@@ -55,6 +56,40 @@ const NAV_ITEMS: Array<{
   { id: 'settings', label: 'Settings', icon: 'tune', hoverColor: 'group-hover:text-slate-200' },
 ];
 
+function mapBackendAccount(account: any): PropAccount {
+  const startingBalance = Number(account.starting_balance || 0);
+  const currentBalance = Number(account.current_balance || 0);
+  const currentEquity = Number(account.current_equity || 0);
+  const profitTarget = Number(account.prop_phase?.profit_target_amount ?? startingBalance * 0.06);
+  return {
+    id: account.id,
+    name: account.account_name,
+    ref: `#${account.account_number}-${(account.broker_name || '').slice(0, 2).toUpperCase()}`,
+    shortRef: `${account.broker_name} #${account.account_number}`,
+    bridge: account.server_name,
+    phase: account.prop_phase?.phase_name || 'Phase 1',
+    baseBalance: startingBalance,
+    currentBalance,
+    liveEquity: currentEquity,
+    floatingPnl: Number((currentEquity - currentBalance).toFixed(2)),
+    netProfit: Number((currentBalance - startingBalance).toFixed(2)),
+    roiPercent: startingBalance > 0
+      ? Number((((currentBalance - startingBalance) / startingBalance) * 100).toFixed(2))
+      : 0,
+    targetProfit: profitTarget,
+    targetPercent: Number(account.prop_phase?.profit_target_percent ?? 6),
+    passThreshold: Number(account.prop_phase?.pass_threshold ?? startingBalance + profitTarget),
+    dailyLimit: Number(account.prop_firm?.daily_loss_limit ?? startingBalance * 0.05),
+    currentDailyDrawdown: Number(account.prop_firm?.current_daily_drawdown || 0),
+    maxLossLimit: Number(account.prop_firm?.max_loss_limit ?? startingBalance * 0.1),
+    currentMaxDrawdown: Number(account.prop_firm?.current_max_drawdown || 0),
+    peakWater: Number(account.prop_firm?.peak_watermark ?? startingBalance),
+    status: account.prop_firm?.breach_status || 'SAFE',
+    isRealConnected: account.connection_status === 'CONNECTED',
+    tradeCount: Number(account.trades_count || 0),
+  };
+}
+
 export default function App() {
   const [authToken, setAuthToken] = useState(() =>
     import.meta.env.DEV ? 'local-development' : sessionStorage.getItem('nova_session') || ''
@@ -65,6 +100,7 @@ export default function App() {
   const [accounts, setAccounts] = useState<PropAccount[]>([]);
 
   const [activeAccountId, setActiveAccountId] = useState<string>('');
+  const [isConnectAccountOpen, setIsConnectAccountOpen] = useState(false);
 
   const [trades, setTrades] = useState<TradeExecution[]>([]);
 
@@ -210,6 +246,57 @@ export default function App() {
     setAccounts([]);
     setActiveAccountId('');
     setTrades([]);
+  };
+
+  const handleLocalAccountConnected = async () => {
+    const backendAccounts = await ApiClient.getAccounts();
+    const connectedAccounts = backendAccounts.filter((account: any) => account.connection_status === 'CONNECTED');
+    const mappedAccounts = connectedAccounts.map(mapBackendAccount);
+    if (mappedAccounts.length === 0) {
+      throw new Error('MT5 connected, but NOVA has not received the account snapshot yet. Check the connector status and try again.');
+    }
+    setAccounts(mappedAccounts);
+    setActiveAccountId(mappedAccounts[0].id);
+    setIsConnectAccountOpen(false);
+    setActiveNav('overview');
+    const first = connectedAccounts[0];
+    setMt5Config({
+      ...DEFAULT_MT5_CONFIG,
+      isConnected: true,
+      loginId: String(first.account_number),
+      broker: first.broker_name,
+      server: first.server_name,
+      phase: first.prop_phase?.phase_name || '',
+      baseBalance: Number(first.starting_balance),
+    });
+    setLastSyncedTime(first.last_synced_at || null);
+    const backendTrades = await ApiClient.getTrades(first.id);
+    const mappedTrades: TradeExecution[] = backendTrades.map((trade: any) => ({
+      id: `MT5-${trade.primary_ticket || trade.id}`,
+      accountId: trade.trading_account_id,
+      time: trade.opened_at ? new Date(trade.opened_at).toLocaleString() : 'Time unavailable',
+      instrument: trade.symbol,
+      side: trade.direction,
+      entry: trade.entry_price?.toString() || '',
+      exit: trade.exit_price?.toString(),
+      lots: trade.volume?.toString() || '',
+      outcome: trade.outcome,
+      rMultiple: `${trade.r_multiple >= 0 ? '+' : ''}${trade.r_multiple}R`,
+      rValue: Number(trade.r_multiple),
+      netPnl: `${trade.net_profit >= 0 ? '+' : '-'}$${Math.abs(trade.net_profit).toFixed(2)}`,
+      pnlValue: Number(trade.net_profit),
+      quality: trade.confluences?.setup_quality || 'Not reviewed',
+      discipline: trade.confluences?.discipline_score != null
+        ? `${trade.confluences.discipline_score}% (${trade.confluences.rules_followed_count || 0}/6)`
+        : 'Not reviewed',
+      disciplineScore: Number(trade.confluences?.discipline_score || 0),
+      session: trade.session_window || 'Unknown',
+      holdDuration: trade.hold_duration || 'Unknown',
+      fees: trade.commission != null ? `${Number(trade.commission).toFixed(2)}` : 'Not reported',
+      notes: trade.confluences?.notes || trade.comment || '',
+      rulesPassed: Number(trade.confluences?.rules_followed_count || 0),
+    }));
+    setTrades(mappedTrades);
   };
 
   if (!authToken) {
@@ -426,15 +513,28 @@ export default function App() {
   };
   if (!activeAccount) {
     return (
-      <main className="min-h-screen bg-[#08090d] text-slate-100 flex items-center justify-center p-6">
-        <section className="max-w-lg w-full rounded-2xl border border-white/10 bg-[#11141e] p-8 text-center">
-          <h1 className="text-xl font-bold text-white">No MT5 account connected</h1>
-          <p className="mt-3 text-sm text-slate-300">
-            This dashboard stays empty until the local MT5 connector authenticates with your Investor Password
-            and sends its first real account snapshot. Start the connector on the computer running MetaTrader 5.
-          </p>
-        </section>
-      </main>
+      <div className="min-h-screen bg-[#08090d] text-slate-100">
+        <header className="flex h-16 items-center justify-between border-b border-white/10 bg-[#0a0c13] px-5 sm:px-8">
+          <span className="font-bold tracking-[0.2em] text-white">NOVA</span>
+          <nav className="flex items-center gap-2">
+            <button type="button" onClick={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} className={`rounded-lg px-3 py-2 text-sm ${activeNav === 'overview' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>Dashboard</button>
+            <button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className={`rounded-lg px-3 py-2 text-sm ${activeNav === 'accounts' ? 'bg-purple-600/30 text-white' : 'text-slate-400 hover:text-white'}`}>Accounts</button>
+            <button type="button" onClick={handleSignOut} className="ml-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 hover:text-white">Sign out</button>
+          </nav>
+        </header>
+        <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-5 sm:p-8">
+          {activeNav === 'accounts' || isConnectAccountOpen ? (
+            <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
+          ) : (
+            <section className="rounded-2xl border border-white/10 bg-[#11141e] p-8 sm:p-12">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-300">Dashboard</p>
+              <h1 className="mt-3 text-2xl font-bold text-white">Your dashboard is ready</h1>
+              <p className="mt-2 max-w-xl text-sm text-slate-400">Account balances, positions, and trading history will appear here after you connect an MT5 account.</p>
+              <button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="mt-6 rounded-lg bg-purple-600 px-5 py-2.5 text-sm font-semibold text-white">Go to Accounts</button>
+            </section>
+          )}
+        </main>
+      </div>
     );
   }
 
@@ -789,11 +889,12 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setShowProfileMenu(false);
-                        void handleSyncFromHeader();
+                        setActiveNav('accounts');
+                        setIsConnectAccountOpen(true);
                       }}
                       className="mt-2 py-2 px-3 rounded-lg bg-purple-600/30 border border-purple-500/40 hover:bg-purple-600/50 text-purple-200 font-label-tech text-xs font-bold text-center"
                     >
-                      Sync MT5
+                      Add MT5 Account
                     </button>
                   </div>
                 </div>
@@ -837,7 +938,9 @@ export default function App() {
           {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
 
           {activeNav === 'accounts' && (
-            <AccountsScreen
+            isConnectAccountOpen ? (
+              <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => setIsConnectAccountOpen(false)} />
+            ) : <AccountsScreen
               accounts={accounts}
               activeAccountId={activeAccount.id}
               trades={trades}
@@ -845,7 +948,7 @@ export default function App() {
                 setActiveAccountId(id);
                 setActiveNav('overview');
               }}
-              onOpenConnectModal={() => void handleSyncFromHeader()}
+              onOpenConnectModal={() => setIsConnectAccountOpen(true)}
               onDeleteAccount={handleDeleteAccount}
               onSyncPastTrades={(id) => void handleSyncFromHeader(id)}
               onOpenImportModal={(acc) => {
@@ -865,7 +968,10 @@ export default function App() {
               onToggleRule={handleToggleRule}
               activeAccount={activeAccount}
               mt5Config={mt5Config}
-              onOpenConnectModal={() => void handleSyncFromHeader()}
+              onOpenConnectModal={() => {
+                setActiveNav('accounts');
+                setIsConnectAccountOpen(true);
+              }}
               onClearData={handleClearAllData}
             />
           )}

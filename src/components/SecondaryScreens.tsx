@@ -310,7 +310,7 @@ export const AccountsScreen: React.FC<{
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-label-tech text-xs font-bold hover:brightness-110 shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all flex items-center gap-1.5"
           >
             <span className="material-symbols-outlined text-sm">add_link</span>
-            <span>Sync MT5</span>
+            <span>Add Account</span>
           </button>
         </div>
       </div>
@@ -325,7 +325,7 @@ export const AccountsScreen: React.FC<{
             No MT5 Accounts Connected
           </h3>
           <p className="font-body-sm text-xs text-slate-400 max-w-md mb-6">
-            All accounts have been deleted. Connect your real MetaTrader 5 account to monitor live equity, drawdowns, and past trade history.
+            Connect a MetaTrader 5 account to monitor real account data, positions, and trade history.
           </p>
           <button
             type="button"
@@ -333,7 +333,7 @@ export const AccountsScreen: React.FC<{
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-label-tech text-xs font-bold hover:brightness-110 transition-all shadow-[0_0_20px_rgba(139,92,246,0.4)] flex items-center gap-2"
           >
             <span className="material-symbols-outlined text-base">add_link</span>
-            <span>Sync MT5</span>
+            <span>Connect Account</span>
           </button>
         </div>
       ) : (
