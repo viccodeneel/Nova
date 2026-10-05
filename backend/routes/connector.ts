@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { processMT5SyncPayload } from '../services/mt5SyncService.ts';
+import { processMT5SyncPayload, syncMT5Account } from '../services/mt5SyncService.ts';
 import { isDatabaseConnected } from '../../database/db.ts';
 
 const router = Router();

@@ -13,11 +13,35 @@ export interface ApiSyncResult {
 }
 
 export class ApiClient {
-  private static baseUrl = '/api';
+  private static baseUrl = `${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')}/api`;
+
+  private static async request(url: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    const token = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem('nova_session');
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch(url, { ...init, headers });
+    if (response.status === 401 && token && typeof window !== 'undefined') {
+      sessionStorage.removeItem('nova_session');
+      window.dispatchEvent(new Event('nova:auth-expired'));
+    }
+    return response;
+  }
+
+  public static async login(password: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.token) throw new Error(data.message || 'Unable to sign in.');
+    return data.token as string;
+  }
 
   public static async getAccounts(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/accounts`, { signal: AbortSignal.timeout(4000) });
+      const res = await this.request(`${this.baseUrl}/accounts`, { signal: AbortSignal.timeout(4000) });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const data = await res.json();
       return data.data || [];
@@ -29,7 +53,7 @@ export class ApiClient {
 
   public static async getAccountById(id: string): Promise<any | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/accounts/${id}`, { signal: AbortSignal.timeout(4000) });
+      const res = await this.request(`${this.baseUrl}/accounts/${id}`, { signal: AbortSignal.timeout(4000) });
       if (!res.ok) return null;
       const data = await res.json();
       return data.data || null;
@@ -41,7 +65,7 @@ export class ApiClient {
 
   public static async getAccountPositions(id: string): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/accounts/${id}/positions`, { signal: AbortSignal.timeout(4000) });
+      const res = await this.request(`${this.baseUrl}/accounts/${id}/positions`, { signal: AbortSignal.timeout(4000) });
       if (!res.ok) return [];
       const data = await res.json();
       return data.data || [];
@@ -55,7 +79,7 @@ export class ApiClient {
       const url = accountId && accountId !== 'ALL'
         ? `${this.baseUrl}/trades?account_id=${encodeURIComponent(accountId)}`
         : `${this.baseUrl}/trades`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      const res = await this.request(url, { signal: AbortSignal.timeout(4000) });
       if (!res.ok) return [];
       const data = await res.json();
       return data.data || [];
@@ -67,7 +91,7 @@ export class ApiClient {
 
   public static async syncAccount(accountId: string): Promise<ApiSyncResult> {
     try {
-      const res = await fetch(`${this.baseUrl}/accounts/${accountId}/sync`, {
+      const res = await this.request(`${this.baseUrl}/accounts/${accountId}/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(8000),
@@ -85,7 +109,7 @@ export class ApiClient {
 
   public static async syncMT5(): Promise<ApiSyncResult> {
     try {
-      const res = await fetch(`${this.baseUrl}/connector/sync`, {
+      const res = await this.request(`${this.baseUrl}/connector/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(12000),
@@ -103,7 +127,7 @@ export class ApiClient {
 
   public static async createAccount(accountData: any): Promise<any | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/accounts`, {
+      const res = await this.request(`${this.baseUrl}/accounts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(accountData),
@@ -120,7 +144,7 @@ export class ApiClient {
 
   public static async deleteAccount(accountId: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/accounts/${accountId}`, {
+      const res = await this.request(`${this.baseUrl}/accounts/${accountId}`, {
         method: 'DELETE',
         signal: AbortSignal.timeout(4000),
       });
@@ -135,7 +159,7 @@ export class ApiClient {
     confluences: any
   ): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/trades/${tradeId}`, {
+      const res = await this.request(`${this.baseUrl}/trades/${tradeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(confluences),

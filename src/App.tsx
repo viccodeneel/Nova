@@ -17,6 +17,7 @@ import {
   SettingsScreen,
 } from './components/SecondaryScreens';
 import { Mt5ImportModal } from './components/Mt5ImportModal';
+import { LoginScreen } from './components/LoginScreen';
 import { ApiClient } from './services/apiClient.ts';
 
 const NOVA_LOGO_URL =
@@ -72,6 +73,9 @@ function loadSavedTrades(): TradeExecution[] {
 }
 
 export default function App() {
+  const [authToken, setAuthToken] = useState(() =>
+    import.meta.env.DEV ? 'local-development' : sessionStorage.getItem('nova_session') || ''
+  );
   const [activeNav, setActiveNav] = useState<NavSection>('overview');
 
   // Load from localStorage or defaults
@@ -97,8 +101,21 @@ export default function App() {
   const [showAlertsPopover, setShowAlertsPopover] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
 
+  useEffect(() => {
+    const clearSession = () => {
+      sessionStorage.removeItem('nova_session');
+      setAuthToken('');
+      setAccounts([]);
+      setActiveAccountId('');
+      setTrades([]);
+    };
+    window.addEventListener('nova:auth-expired', clearSession);
+    return () => window.removeEventListener('nova:auth-expired', clearSession);
+  }, []);
+
   // Initial load from backend API
   useEffect(() => {
+    if (!authToken) return;
     ApiClient.getAccounts().then((backendAccounts) => {
       if (backendAccounts) {
         const connectedAccounts = backendAccounts.filter((a: any) => a.connection_status === 'CONNECTED');
@@ -182,16 +199,17 @@ export default function App() {
         setTrades(mapped);
       }
     });
-  }, []);
+  }, [authToken]);
 
   // Sync to localStorage
   useEffect(() => {
+    if (!authToken) return;
     try {
       localStorage.setItem('nova_mt5_trades', JSON.stringify(trades));
     } catch {
       // ignore
     }
-  }, [trades]);
+  }, [trades, authToken]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -212,6 +230,25 @@ export default function App() {
   };
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0];
+
+  const handleSignOut = () => {
+    sessionStorage.removeItem('nova_session');
+    setAuthToken('');
+    setAccounts([]);
+    setActiveAccountId('');
+    setTrades([]);
+  };
+
+  if (!authToken) {
+    return (
+      <LoginScreen
+        onAuthenticated={(token) => {
+          sessionStorage.setItem('nova_session', token);
+          setAuthToken(token);
+        }}
+      />
+    );
+  }
 
   const handleToggleRule = (ruleId: string) => {
     setDlmRules((prev) =>
@@ -623,6 +660,15 @@ export default function App() {
             <div className="h-6 w-px bg-white/10 mx-1"></div>
 
             <div className="flex items-center gap-2 relative">
+              {!import.meta.env.DEV && (
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white"
+                >
+                  Sign out
+                </button>
+              )}
               <button
                 onClick={() => setAudioMuted(!audioMuted)}
                 className={`flex items-center justify-center h-9 w-9 rounded-lg border transition-all shadow-sm ${
