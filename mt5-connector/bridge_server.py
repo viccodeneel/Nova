@@ -429,7 +429,12 @@ def _watch_and_sync():
                     )
                 else:
                     balance = snapshot.get("account", {}).get("balance", "unknown")
-                    logger.info(f"Scheduled MT5 snapshot accepted by NOVA; MT5 balance={balance}")
+                    deals_received = len(snapshot.get("deals", []))
+                    trades_synced = result.get("trades_created_or_updated", "unknown")
+                    logger.info(
+                        "Scheduled MT5 snapshot accepted by NOVA; "
+                        f"balance={balance}, deals_received={deals_received}, trades_synced={trades_synced}"
+                    )
                     if include_history:
                         last_history_sync = now
             except Exception as e:

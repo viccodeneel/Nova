@@ -227,7 +227,10 @@ class MT5Connector:
 
         deals = mt5.history_deals_get(date_from, date_to)
         if deals is None:
+            logger.warning(f"MT5 history query failed: {mt5.last_error()}")
             return []
+
+        logger.info(f"MT5 returned {len(deals)} deal records for the past {lookback_days} days")
 
         formatted: List[Dict[str, Any]] = []
         for deal in deals:
