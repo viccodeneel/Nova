@@ -19,11 +19,13 @@ import { initializeDatabase, isDatabaseConnected } from './database/db.ts';
 import accountsRouter from './backend/routes/accounts.ts';
 import tradesRouter from './backend/routes/trades.ts';
 import connectorRouter from './backend/routes/connector.ts';
+import authRouter, { requireAuth } from './backend/routes/auth.ts';
 
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const isProduction = process.env.NODE_ENV === 'production';
+  if (isProduction) app.set('trust proxy', 1);
 
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
@@ -57,12 +59,19 @@ async function startServer() {
   });
 
   // Initialize PostgreSQL schema if configured
-  await initializeDatabase();
+  const databaseReady = await initializeDatabase();
+  if (isProduction && !databaseReady) {
+    throw new Error('DATABASE_URL must be configured and reachable in production.');
+  }
 
   // API Routes
-  app.use('/api/accounts', accountsRouter);
-  app.use('/api/trades', tradesRouter);
-  app.use('/api/connector', connectorRouter);
+  app.use('/api/auth', authRouter);
+  app.use('/api/accounts', requireAuth, accountsRouter);
+  app.use('/api/trades', requireAuth, tradesRouter);
+  app.use('/api/connector', (req, res, next) => {
+    if (req.path === '/sync-webhook') return next();
+    return requireAuth(req, res, next);
+  }, connectorRouter);
 
   // Health endpoint
   app.get('/api/health', (req, res) => {

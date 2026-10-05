@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: nova-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: NODE_ENV
+        value: production
+      - key: DB_SSL
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: NOVA_AUTH_PASSWORD
+        sync: false
+      - key: NOVA_AUTH_SECRET
+        generateValue: true
+      - key: MT5_BRIDGE_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://viccodeneel.github.io
