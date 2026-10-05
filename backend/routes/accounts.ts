@@ -40,10 +40,11 @@ router.post('/', async (req: Request, res: Response) => {
       max_loss_percent,
     } = req.body;
 
-    if (!account_number || !server_name || !broker_name) {
+    if (!Number.isFinite(Number(account_number)) || !server_name || !broker_name ||
+        !Number.isFinite(Number(starting_balance)) || Number(starting_balance) <= 0) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: account_number, server_name, broker_name',
+        error: 'Valid account_number, broker_name, server_name, and starting_balance are required',
       });
     }
 
@@ -52,7 +53,7 @@ router.post('/', async (req: Request, res: Response) => {
       account_number: Number(account_number),
       broker_name,
       server_name,
-      starting_balance: Number(starting_balance) || 10000.0,
+      starting_balance: Number(starting_balance),
       account_type,
       currency,
       leverage: Number(leverage) || 100,

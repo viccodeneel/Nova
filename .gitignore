@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+backend/.env
+mt5-connector/.env

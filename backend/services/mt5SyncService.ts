@@ -429,26 +429,56 @@ async function updatePropPhaseMetrics(accountId: string): Promise<void> {
  * 2. Fetches MT5 snapshot from Python connector service if reachable
  * 3. Ingests into PostgreSQL and triggers trade aggregation
  */
-export async function syncMT5Account(accountId: string): Promise<SyncResult> {
-  const connectorUrl = process.env.MT5_CONNECTOR_URL || 'http://localhost:8000';
+export async function syncMT5Account(accountId?: string): Promise<SyncResult> {
+  const connectorUrl = process.env.MT5_CONNECTOR_URL || 'http://localhost:5001';
+  const bridgeSecret = process.env.MT5_BRIDGE_SECRET;
   const targetUrl = connectorUrl.endsWith('/sync')
     ? connectorUrl
     : `${connectorUrl.replace(/\/+$/, '')}/sync`;
 
+  if (!bridgeSecret) {
+    return {
+      success: false,
+      message: 'MT5 bridge authentication is not configured.',
+      account_id: accountId || '',
+      account_number: 0,
+      positions_synced: 0,
+      deals_synced: 0,
+      trades_created_or_updated: 0,
+      synced_at: new Date().toISOString(),
+      error: 'BRIDGE_SECRET_NOT_CONFIGURED',
+    };
+  }
+
   try {
     // Ping Python MT5 connector service
-    const response = await fetch(`${targetUrl}?account_id=${accountId}`, {
+    const query = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+    const response = await fetch(`${targetUrl}${query}`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
-        'X-MT5-Bridge-Key': process.env.MT5_BRIDGE_SECRET || 'nova_mt5_bridge_secret_ld4',
+        'X-MT5-Bridge-Key': bridgeSecret,
       },
       signal: AbortSignal.timeout(6000),
     });
 
     if (response.ok) {
       const payload: MT5SyncPayload = await response.json();
-      return await processMT5SyncPayload(accountId, payload);
+      if ((payload.account as any)?.data_mode === 'SIMULATED') {
+        return {
+          success: false,
+          message: 'Simulated connector data is blocked from account sync.',
+          account_id: accountId || '',
+          account_number: 0,
+          positions_synced: 0,
+          deals_synced: 0,
+          trades_created_or_updated: 0,
+          synced_at: new Date().toISOString(),
+          error: 'SIMULATION_DATA_REJECTED',
+        };
+      }
+      const targetAccountId = accountId || `acc-${payload.account.account_number}`;
+      return await processMT5SyncPayload(targetAccountId, payload);
     } else {
       console.warn(`[MT5 Connector Response] Status ${response.status} from ${targetUrl}`);
     }
@@ -456,26 +486,10 @@ export async function syncMT5Account(accountId: string): Promise<SyncResult> {
     // Connector service is not running or unreachable
   }
 
-  // Graceful fallback: If Python connector is not currently running locally,
-  // we check if we already have account data or return informative status
-  const existing = await inMemoryStore.getAccount(accountId);
-  if (existing) {
-    return {
-      success: true,
-      message: 'Synchronized with local MT5 cache. (To stream real-time data from MT5 terminal, start mt5-connector/sync.py)',
-      account_id: accountId,
-      account_number: existing.account_number,
-      positions_synced: existing.positions_count || 0,
-      deals_synced: existing.trades_count || 0,
-      trades_created_or_updated: existing.trades_count || 0,
-      synced_at: new Date().toISOString(),
-    };
-  }
-
   return {
     success: false,
     message: 'MT5 Connector Service is not reachable on ' + connectorUrl + '. Please start the Python MT5 service (python mt5-connector/sync.py).',
-    account_id: accountId,
+    account_id: accountId || '',
     account_number: 0,
     positions_synced: 0,
     deals_synced: 0,

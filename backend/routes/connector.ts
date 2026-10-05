@@ -4,6 +4,19 @@ import { isDatabaseConnected } from '../../database/db.ts';
 
 const router = Router();
 
+// POST /api/connector/sync - Pull the configured MT5 account from the local bridge
+router.post('/sync', async (_req: Request, res: Response) => {
+  try {
+    const result = await syncMT5Account();
+    res.status(result.success ? 200 : 503).json(result);
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: (err as Error).message,
+    });
+  }
+});
+
 // GET /api/connector/health - Gateway status
 router.get('/health', (req: Request, res: Response) => {
   res.json({
@@ -19,7 +32,14 @@ router.get('/health', (req: Request, res: Response) => {
 router.post('/sync-webhook', async (req: Request, res: Response) => {
   try {
     const bridgeKey = req.headers['x-mt5-bridge-key'] as string;
-    const expectedSecret = process.env.MT5_BRIDGE_SECRET || 'nova_mt5_bridge_secret_ld4';
+    const expectedSecret = process.env.MT5_BRIDGE_SECRET;
+
+    if (!expectedSecret) {
+      return res.status(503).json({
+        success: false,
+        error: 'MT5 bridge authentication is not configured',
+      });
+    }
 
     // Verify secret to reject unauthorized payloads
     if (bridgeKey !== expectedSecret) {

@@ -11,69 +11,6 @@ class InMemoryStore {
   private positions: Map<string, MT5PositionSnapshot[]> = new Map();
   private deals: Map<string, MT5DealSnapshot[]> = new Map();
   private trades: Map<string, LogicalTrade[]> = new Map();
-
-  constructor() {
-    this.seedDefaultAccount();
-  }
-
-  private seedDefaultAccount() {
-    const defaultAccountId = 'acc-mt5-primary';
-    const account: TradingAccountRecord = {
-      id: defaultAccountId,
-      account_name: 'FundingPips Evaluation Phase 1',
-      account_number: 884192,
-      broker_name: 'FundingPips',
-      server_name: 'FundingPips-Server',
-      account_type: 'evaluation',
-      currency: 'USD',
-      leverage: 100,
-      starting_balance: 5000.0,
-      current_balance: 5000.0,
-      current_equity: 5000.0,
-      credit: 0.0,
-      margin: 0.0,
-      free_margin: 5000.0,
-      margin_level: 0.0,
-      connection_status: 'DISCONNECTED',
-      bridge_protocol: 'PYTHON_CONNECTOR',
-      is_active: true,
-      last_synced_at: undefined,
-      positions_count: 0,
-      trades_count: 0,
-      prop_firm: {
-        trading_account_id: defaultAccountId,
-        prop_firm_name: 'FundingPips',
-        program_name: '5K Evaluation',
-        max_loss_percent: 10.0,
-        max_loss_limit: 500.0,
-        daily_loss_percent: 5.0,
-        daily_loss_limit: 250.0,
-        current_daily_drawdown: 0.0,
-        current_max_drawdown: 0.0,
-        peak_watermark: 5000.0,
-        breach_status: 'SAFE',
-      },
-      prop_phase: {
-        phase_name: 'Phase 1 Evaluation',
-        starting_balance: 5000.0,
-        profit_target_percent: 6.0,
-        profit_target_amount: 300.0,
-        pass_threshold: 5300.0,
-        minimum_trading_days: 0,
-        current_trading_days: 0,
-        current_profit: 0.0,
-        progress_percentage: 0.0,
-        remaining_target: 300.0,
-        phase_status: 'IN_PROGRESS',
-      },
-    };
-
-    this.accounts.set(defaultAccountId, account);
-    this.positions.set(defaultAccountId, []);
-    this.deals.set(defaultAccountId, []);
-    this.trades.set(defaultAccountId, []);
-  }
-
   public async getAllAccounts(): Promise<TradingAccountRecord[]> {
     return Array.from(this.accounts.values());
   }

@@ -40,15 +40,13 @@ export const TradeJournalScreen: React.FC<TradeJournalScreenProps> = ({
     'XAUUSD'
   );
   const [newSide, setNewSide] = useState<'BUY' | 'SELL'>('BUY');
-  const [newEntry, setNewEntry] = useState('2655.40');
-  const [newLots, setNewLots] = useState('0.25');
-  const [newOutcome, setNewOutcome] = useState<'WIN' | 'LOSS' | 'BE'>('WIN');
-  const [newR, setNewR] = useState('2.5');
-  const [newPnl, setNewPnl] = useState('100.00');
-  const [newQuality, setNewQuality] = useState('A+ DLM Sweep');
-  const [newNotes, setNewNotes] = useState(
-    'London/NY Overlap liquidity sweep confirmed with M1 Bullish FVG retest.'
-  );
+  const [newEntry, setNewEntry] = useState('');
+  const [newLots, setNewLots] = useState('');
+  const [newOutcome, setNewOutcome] = useState<'WIN' | 'LOSS' | 'BE'>('BE');
+  const [newR, setNewR] = useState('');
+  const [newPnl, setNewPnl] = useState('');
+  const [newQuality, setNewQuality] = useState('');
+  const [newNotes, setNewNotes] = useState('');
 
   // Filter trades by selected account, instrument, outcome, and search query
   const filteredTrades = trades.filter((t) => {

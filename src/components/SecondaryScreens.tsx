@@ -274,7 +274,7 @@ export const AccountsScreen: React.FC<{
   const handleSyncDeals = (accId: string, count: number = 5) => {
     setSyncingAccountId(accId);
     setTimeout(() => {
-      onSyncPastTrades(accId, count);
+      onSyncPastTrades(accId);
       setSyncingAccountId(null);
     }, 400);
   };
@@ -297,7 +297,7 @@ export const AccountsScreen: React.FC<{
             </span>
           </div>
           <span className="block font-body-sm text-xs text-slate-400 mt-0.5">
-            Switch active MT5 LD4 Bridge terminal routing, inspect past trade histories, or remove unused accounts
+            Review synced MT5 accounts and their recorded trade history
           </span>
         </div>
         <div className="flex items-center gap-3">
@@ -310,7 +310,7 @@ export const AccountsScreen: React.FC<{
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-label-tech text-xs font-bold hover:brightness-110 shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all flex items-center gap-1.5"
           >
             <span className="material-symbols-outlined text-sm">add_link</span>
-            <span>Connect Real MT5 Account</span>
+            <span>Sync MT5</span>
           </button>
         </div>
       </div>
@@ -333,7 +333,7 @@ export const AccountsScreen: React.FC<{
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-label-tech text-xs font-bold hover:brightness-110 transition-all shadow-[0_0_20px_rgba(139,92,246,0.4)] flex items-center gap-2"
           >
             <span className="material-symbols-outlined text-base">add_link</span>
-            <span>Connect Real MT5 Account</span>
+            <span>Sync MT5</span>
           </button>
         </div>
       ) : (
@@ -1088,7 +1088,7 @@ export const SettingsScreen: React.FC<{
             </div>
             <div>
               <h3 className="font-headline-sm text-base font-bold text-white">
-                MetaTrader 5 LD4 Bridge Configuration
+                MetaTrader 5 connection
               </h3>
               <span className="font-label-tech text-[10px] text-cyan-400">
                 DIRECT EA &amp; REST WEBHOOK RELAY
@@ -1129,7 +1129,7 @@ export const SettingsScreen: React.FC<{
               Bridge Latency
             </span>
             <div className="font-label-numeric-sm text-xs font-bold text-cyan-300 mt-1">
-              14ms • London Equinix LD4
+              Not available
             </div>
           </div>
         </div>
