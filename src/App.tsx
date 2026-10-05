@@ -55,23 +55,6 @@ const NAV_ITEMS: Array<{
   { id: 'settings', label: 'Settings', icon: 'tune', hoverColor: 'group-hover:text-slate-200' },
 ];
 
-const SYNTHETIC_TRADE_IDS = new Set(
-  Array.from({ length: 10 }, (_, index) => `MT5-${920000 + index * 314}`)
-);
-
-function loadSavedTrades(): TradeExecution[] {
-  try {
-    const saved = localStorage.getItem('nova_mt5_trades');
-    if (!saved) return [];
-    const parsed = JSON.parse(saved) as TradeExecution[];
-    return parsed.filter(
-      (trade) => !SYNTHETIC_TRADE_IDS.has(trade.id) && !/^TX-\d+$/.test(trade.id) && !/^mt5-\d+$/i.test(trade.accountId || '')
-    );
-  } catch {
-    return [];
-  }
-}
-
 export default function App() {
   const [authToken, setAuthToken] = useState(() =>
     import.meta.env.DEV ? 'local-development' : sessionStorage.getItem('nova_session') || ''
@@ -83,7 +66,7 @@ export default function App() {
 
   const [activeAccountId, setActiveAccountId] = useState<string>('');
 
-  const [trades, setTrades] = useState<TradeExecution[]>(loadSavedTrades);
+  const [trades, setTrades] = useState<TradeExecution[]>([]);
 
   const [mt5Config, setMt5Config] = useState<Mt5BridgeConfig>(DEFAULT_MT5_CONFIG);
 
@@ -200,16 +183,6 @@ export default function App() {
       }
     });
   }, [authToken]);
-
-  // Sync to localStorage
-  useEffect(() => {
-    if (!authToken) return;
-    try {
-      localStorage.setItem('nova_mt5_trades', JSON.stringify(trades));
-    } catch {
-      // ignore
-    }
-  }, [trades, authToken]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -455,24 +428,11 @@ export default function App() {
     return (
       <main className="min-h-screen bg-[#08090d] text-slate-100 flex items-center justify-center p-6">
         <section className="max-w-lg w-full rounded-2xl border border-white/10 bg-[#11141e] p-8 text-center">
-          <h1 className="text-xl font-bold text-white">No MT5 account data yet</h1>
+          <h1 className="text-xl font-bold text-white">No MT5 account connected</h1>
           <p className="mt-3 text-sm text-slate-300">
-            NOVA will show an account after the local MT5 connector authenticates and sends a snapshot.
-            Check the connector settings and use an Investor Password for read-only access.
+            This dashboard stays empty until the local MT5 connector authenticates with your Investor Password
+            and sends its first real account snapshot. Start the connector on the computer running MetaTrader 5.
           </p>
-          <button
-            type="button"
-            onClick={() => void handleSyncFromHeader()}
-            disabled={isSyncing}
-            className="mt-6 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            {isSyncing ? 'Syncing MT5…' : 'Sync from MT5'}
-          </button>
-          {syncToast && (
-            <p className={`mt-4 text-sm ${syncToast.success ? 'text-emerald-300' : 'text-rose-300'}`}>
-              {syncToast.message}
-            </p>
-          )}
         </section>
       </main>
     );

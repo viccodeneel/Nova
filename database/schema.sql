@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS trading_accounts (
     free_margin NUMERIC(15, 2) DEFAULT 10000.00,
     margin_level NUMERIC(10, 2) DEFAULT 0.00,
     connection_status VARCHAR(30) DEFAULT 'DISCONNECTED', -- CONNECTED, DISCONNECTED, ERROR
+    mt5_data_verified BOOLEAN NOT NULL DEFAULT FALSE,
     bridge_protocol VARCHAR(50) DEFAULT 'PYTHON_CONNECTOR', -- PYTHON_CONNECTOR, EA_WEBHOOK, REST_GATEWAY
     is_active BOOLEAN DEFAULT TRUE,
     last_synced_at TIMESTAMPTZ,
@@ -48,6 +49,10 @@ CREATE TABLE IF NOT EXISTS trading_accounts (
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_account_broker_number UNIQUE (account_number, server_name)
 );
+
+-- Legacy accounts remain hidden until a real MT5 snapshot verifies them.
+ALTER TABLE trading_accounts
+    ADD COLUMN IF NOT EXISTS mt5_data_verified BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- ----------------------------------------------------------------------------
 -- 3. PROP FIRM ACCOUNTS (Configuration & Rule Sets)

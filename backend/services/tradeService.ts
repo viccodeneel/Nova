@@ -27,6 +27,8 @@ export async function getTradesByAccount(accountId?: string): Promise<LogicalTra
           'notes', c.notes
         ) as confluences
       FROM trades t
+      INNER JOIN trading_accounts a
+        ON a.id = t.trading_account_id AND a.mt5_data_verified IS TRUE
       LEFT JOIN trade_confluences c ON c.trade_id = t.id
     `;
     const params: any[] = [];
@@ -45,9 +47,15 @@ export async function getTradesByAccount(accountId?: string): Promise<LogicalTra
   }
 
   if (accountId && accountId !== 'ALL') {
-    return inMemoryStore.getTrades(accountId);
+    const account = await inMemoryStore.getAccount(accountId);
+    return account?.mt5_data_verified ? inMemoryStore.getTrades(accountId) : [];
   }
-  return inMemoryStore.getAllTrades();
+  const verifiedAccountIds = new Set(
+    (await inMemoryStore.getAllAccounts())
+      .filter((account) => account.mt5_data_verified)
+      .map((account) => account.id)
+  );
+  return (await inMemoryStore.getAllTrades()).filter((trade) => verifiedAccountIds.has(trade.trading_account_id));
 }
 
 export async function updateTradeConfluences(
