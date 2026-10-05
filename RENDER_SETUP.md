@@ -27,13 +27,16 @@ The free Render web service may sleep after 15 minutes without traffic; its next
 3. In **Settings → Pages**, set the publishing source to **GitHub Actions**.
 4. Run the **Deploy NOVA to GitHub Pages** workflow again from the Actions tab. The frontend needs a new build to include the API origin.
 
-## Connect the local MT5 terminal
+## Connect an MT5 account from NOVA
 
-The Render service cannot reach `localhost` on your Windows computer. On that computer, configure the local connector with:
+MT5 runs on your Windows computer, so keep the read-only connector running locally while using the hosted dashboard. In `mt5-connector/.env`, configure:
 
 - `NOVA_BACKEND_URL`: the Render service origin.
 - `MT5_BRIDGE_SECRET`: the generated Render bridge key.
-- `MT5_LOGIN`, `MT5_PASSWORD`, and `MT5_SERVER`: the read-only MT5 Investor login details.
+- `NOVA_FRONTEND_ORIGINS`: the exact dashboard origin, such as `https://nova-backend.onrender.com`. Add `https://viccodeneel.github.io` too if you use GitHub Pages. Use comma-separated origins, with no paths.
+- `MT5_CONNECTOR_HOST=127.0.0.1` and `MT5_CONNECTOR_PORT=5001`.
 - `MT5_SIMULATION_MODE=false`.
 
-Start the local connector in watch mode so it pushes snapshots to Render. Keep the bridge key identical on the Render service and the local connector. The dashboard sign-in password is separate from all MT5 credentials.
+Start the local bridge with `python sync.py --server`. In NOVA, open **Accounts → Add Account** and enter the MT5 login number, server name, and read-only Investor Password. The browser sends those credentials directly to the local bridge; NOVA does not save the password. The connector authenticates with MT5 and pushes account snapshots to Render while it is running.
+
+When the browser asks to allow NOVA to access your local network, allow it for the dashboard site. Keep the bridge key identical on the Render service and the local connector, and never put the Investor Password in `.env` or GitHub. The dashboard sign-in password is separate from MT5 credentials.

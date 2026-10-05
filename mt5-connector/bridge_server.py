@@ -13,6 +13,8 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
@@ -45,9 +47,16 @@ PORT = int(os.getenv("MT5_CONNECTOR_PORT") or os.getenv("PORT") or 5001)
 HOST = os.getenv("MT5_CONNECTOR_HOST", "127.0.0.1")
 MT5_BRIDGE_SECRET = os.getenv("MT5_BRIDGE_SECRET", "")
 NOVA_BACKEND_URL = os.getenv("NOVA_BACKEND_URL", "http://localhost:3000")
+NOVA_FRONTEND_ORIGINS = {
+    origin.strip().rstrip("/")
+    for origin in os.getenv("NOVA_FRONTEND_ORIGINS", "").split(",")
+    if origin.strip()
+}
+SYNC_INTERVAL_SECONDS = max(5, int(os.getenv("SYNC_INTERVAL_SECONDS", "10")))
 
 # Shared connector singleton
 _connector: Optional[MT5Connector] = None
+_connector_lock = threading.Lock()
 
 
 def get_connector() -> MT5Connector:
@@ -68,12 +77,12 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
 
     server_version = "NOVA-MT5-Bridge/1.0.0"
 
-    def _send_json_response(self, status_code: int, data: dict):
+    def _send_json_response(self, status_code: int, data: dict, allowed_origin: Optional[str] = None):
         response_bytes = json.dumps(data, indent=2).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(response_bytes)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", allowed_origin or "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-MT5-Bridge-Key, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -98,6 +107,22 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         """Handle CORS pre-flight requests."""
+        parsed_path = urlparse(self.path).path.rstrip("/")
+        if parsed_path == "/connect":
+            origin = self.headers.get("Origin", "").rstrip("/")
+            if origin not in NOVA_FRONTEND_ORIGINS:
+                self.send_response(HTTPStatus.FORBIDDEN)
+                self.end_headers()
+                return
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            if self.headers.get("Access-Control-Request-Private-Network") == "true":
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.end_headers()
+            return
         self.send_response(HTTPStatus.OK)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-MT5-Bridge-Key, Authorization")
@@ -204,8 +229,74 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
         Reject any trading / order modification attempts.
         Only allows safe on-demand /push trigger to notify the Node backend.
         """
+        global _connector
         parsed_url = urlparse(self.path)
         path = parsed_url.path.rstrip("/")
+
+        if path == "/connect":
+            origin = self.headers.get("Origin", "").rstrip("/")
+            if origin not in NOVA_FRONTEND_ORIGINS:
+                self._send_json_response(HTTPStatus.FORBIDDEN, {"success": False, "message": "This NOVA site is not allowed to connect to the local MT5 bridge."})
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length <= 0 or content_length > 8192:
+                    raise ValueError("Invalid request size")
+                request_data = json.loads(self.rfile.read(content_length))
+                login = int(request_data.get("login", 0))
+                password = request_data.get("password")
+                server = request_data.get("server")
+                if login <= 0 or not isinstance(password, str) or not password or not isinstance(server, str) or not server.strip():
+                    raise ValueError("Enter a valid MT5 login number, server, and Investor Password.")
+
+                with _connector_lock:
+                    previous = _connector
+                    _connector = None
+                if previous:
+                    previous.shutdown()
+
+                candidate = MT5Connector(login=login, password=password, server=server.strip())
+                candidate.initialize()
+                snapshot = candidate.fetch_full_snapshot()
+
+                import requests
+                webhook_url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
+                backend_response = requests.post(
+                    webhook_url,
+                    json=snapshot,
+                    headers={"X-MT5-Bridge-Key": MT5_BRIDGE_SECRET},
+                    timeout=15,
+                )
+                if backend_response.status_code != 200:
+                    candidate.shutdown()
+                    try:
+                        backend_error = backend_response.json().get("error", "")
+                    except ValueError:
+                        backend_error = ""
+                    raise RuntimeError(backend_error or f"NOVA backend rejected the account connection (HTTP {backend_response.status_code}).")
+                try:
+                    backend_result = backend_response.json()
+                except ValueError:
+                    backend_result = {}
+                if not backend_result.get("success"):
+                    candidate.shutdown()
+                    raise RuntimeError(backend_result.get("message", "NOVA could not save the MT5 account snapshot."))
+
+                with _connector_lock:
+                    _connector = candidate
+                self._send_json_response(
+                    HTTPStatus.OK,
+                    {"success": True, "account_number": login, "message": "MT5 account connected and synced."},
+                    allowed_origin=origin,
+                )
+            except Exception as e:
+                logger.warning(f"MT5 account connection failed: {e}")
+                self._send_json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"success": False, "message": str(e)},
+                    allowed_origin=origin,
+                )
+            return
 
         # Check for prohibited trading actions
         if any(term in path.lower() for term in ("order", "trade", "buy", "sell", "close", "modify")):
@@ -284,6 +375,7 @@ def start_server():
         raise RuntimeError("Set MT5_BRIDGE_SECRET to a random value at least 32 characters long.")
     server_address = (HOST, PORT)
     httpd = ThreadingHTTPServer(server_address, MT5BridgeRequestHandler)
+    threading.Thread(target=_watch_and_sync, daemon=True, name="nova-mt5-sync").start()
     print("=" * 72)
     print("  NOVA INTELLIGENCE OS — METATRADER 5 PYTHON BRIDGE (READ-ONLY)")
     print("=" * 72)
@@ -302,6 +394,26 @@ def start_server():
         if _connector:
             _connector.shutdown()
         print("[*] Server stopped cleanly.")
+
+
+def _watch_and_sync():
+    """Push fresh read-only account snapshots while a locally authenticated connector is active."""
+    while True:
+        with _connector_lock:
+            connector = _connector
+        if connector and connector.is_connected:
+            try:
+                import requests
+                webhook_url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
+                requests.post(
+                    webhook_url,
+                    json=connector.fetch_full_snapshot(),
+                    headers={"X-MT5-Bridge-Key": MT5_BRIDGE_SECRET},
+                    timeout=15,
+                )
+            except Exception as e:
+                logger.warning(f"Scheduled MT5 sync failed: {e}")
+        time.sleep(SYNC_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":

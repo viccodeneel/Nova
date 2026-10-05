@@ -51,28 +51,24 @@ This installs the official `MetaTrader5` package, `requests`, and `python-dotenv
 
 Create a `.env` file inside `mt5-connector/`:
 ```env
-# MetaTrader 5 Account Credentials
-MT5_LOGIN=<YOUR_MT5_ACCOUNT_NUMBER>
-MT5_PASSWORD="YourInvestorPassword"
-MT5_SERVER="FundingPips-Server"
+# Must match MT5_BRIDGE_SECRET configured on the Render service
+MT5_BRIDGE_SECRET="<RENDER_MT5_BRIDGE_SECRET>"
 
-# Optional path if MetaTrader 5 is installed in a non-standard path:
-# MT5_PATH="C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+# NOVA service and dashboard origins; origins have no paths
+NOVA_BACKEND_URL="https://your-render-service.onrender.com"
+NOVA_FRONTEND_ORIGINS="https://your-render-service.onrender.com,https://viccodeneel.github.io"
 
-# Pre-Shared Bridge Secret (Must match MT5_BRIDGE_SECRET in your NOVA backend .env)
-MT5_BRIDGE_SECRET="<GENERATE_A_NEW_BRIDGE_SECRET>"
-
-# Connector Service Port
-MT5_CONNECTOR_PORT=5001
+# Local read-only bridge listener
 MT5_CONNECTOR_HOST=127.0.0.1
-
-# NOVA Node.js Backend URL
-NOVA_BACKEND_URL="http://localhost:3000"
-
-# History lookback in days
+MT5_CONNECTOR_PORT=5001
+MT5_SIMULATION_MODE=false
 HISTORY_DAYS=30
+
+# Optional path if MT5 is installed in a non-standard path:
+# MT5_PATH="C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 ```
 
+Do not put `MT5_LOGIN` or `MT5_PASSWORD` in `.env`. Enter your MT5 login, server name, and Investor Password in NOVA's **Accounts → Add Account** form. The password is sent to this computer's local connector and is kept in memory only while the connector is running.
 ---
 
 ## 5. Starting the Connector Service
@@ -80,7 +76,7 @@ HISTORY_DAYS=30
 You can run the connector in either of two modes:
 
 ### Mode A: HTTP REST Bridge Server (Recommended)
-This launches a local REST microservice listening on port 8000. When you click **"Sync MT5"** in the NOVA Dashboard or journal, the Node.js backend immediately queries this bridge via HTTP:
+This launches the local read-only connector on port 5001. Keep it running, then use **Accounts → Add Account** in NOVA and enter your MT5 login, server, and Investor Password:
 ```powershell
 python bridge_server.py
 ```
@@ -96,7 +92,7 @@ Expected output:
 ========================================================================
   • Bridge Server Listening: http://127.0.0.1:5001
   • MT5 Bridge Secret:       Configured (Active)
-  • Read-Only Endpoints:     /health, /account, /positions, /deals, /sync
+  • Read-Only Endpoints:     /health, /account, /positions, /deals, /sync, /connect
   • Safety Mode:             100% Read-Only (Order execution disabled)
 ========================================================================
 ```
