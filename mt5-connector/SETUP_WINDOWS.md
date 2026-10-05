@@ -52,7 +52,7 @@ This installs the official `MetaTrader5` package, `requests`, and `python-dotenv
 Create a `.env` file inside `mt5-connector/`:
 ```env
 # MetaTrader 5 Account Credentials
-MT5_LOGIN=884192
+MT5_LOGIN=<YOUR_MT5_ACCOUNT_NUMBER>
 MT5_PASSWORD="YourInvestorPassword"
 MT5_SERVER="FundingPips-Server"
 
@@ -60,11 +60,11 @@ MT5_SERVER="FundingPips-Server"
 # MT5_PATH="C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 
 # Pre-Shared Bridge Secret (Must match MT5_BRIDGE_SECRET in your NOVA backend .env)
-MT5_BRIDGE_SECRET="9f870cd5bcde8adaf5d90eb1b7debaeae11da2e6168d1dc700d90ae44b081be8"
+MT5_BRIDGE_SECRET="<GENERATE_A_NEW_BRIDGE_SECRET>"
 
 # Connector Service Port
-MT5_CONNECTOR_PORT=8000
-MT5_CONNECTOR_HOST=0.0.0.0
+MT5_CONNECTOR_PORT=5001
+MT5_CONNECTOR_HOST=127.0.0.1
 
 # NOVA Node.js Backend URL
 NOVA_BACKEND_URL="http://localhost:3000"
@@ -86,7 +86,7 @@ python bridge_server.py
 ```
 *Alternative command:*
 ```powershell
-python sync.py --server --port 8000
+python sync.py --server --port 5001
 ```
 
 Expected output:
@@ -94,7 +94,7 @@ Expected output:
 ========================================================================
   NOVA INTELLIGENCE OS — METATRADER 5 PYTHON BRIDGE (READ-ONLY)
 ========================================================================
-  • Bridge Server Listening: http://0.0.0.0:8000
+  • Bridge Server Listening: http://127.0.0.1:5001
   • MT5 Bridge Secret:       Configured (Active)
   • Read-Only Endpoints:     /health, /account, /positions, /deals, /sync
   • Safety Mode:             100% Read-Only (Order execution disabled)
@@ -125,7 +125,7 @@ In a separate PowerShell window, test that the service is running and properly a
 
 ### 1. Public Health Check
 ```powershell
-curl http://localhost:8000/health
+curl http://localhost:5001/health
 ```
 Response:
 ```json
@@ -134,15 +134,13 @@ Response:
   "service": "NOVA MetaTrader 5 Python Bridge",
   "mode": "READ_ONLY",
   "mt5_connected": true,
-  "account_number": 884192,
-  "server": "FundingPips-Server",
   "trading_disabled": true
 }
 ```
 
 ### 2. Verify Authentication Rejection (Missing Header)
 ```powershell
-curl http://localhost:8000/account
+curl http://localhost:5001/account
 ```
 Response:
 ```json
@@ -154,22 +152,22 @@ Response:
 
 ### 3. Query Account Snapshot (Authenticated)
 ```powershell
-curl -H "X-MT5-Bridge-Key: 9f870cd5bcde8adaf5d90eb1b7debaeae11da2e6168d1dc700d90ae44b081be8" http://localhost:8000/account
+curl -H "X-MT5-Bridge-Key: <GENERATE_A_NEW_BRIDGE_SECRET>" http://localhost:5001/account
 ```
 
 ### 4. Query Open Positions (Authenticated)
 ```powershell
-curl -H "X-MT5-Bridge-Key: 9f870cd5bcde8adaf5d90eb1b7debaeae11da2e6168d1dc700d90ae44b081be8" http://localhost:8000/positions
+curl -H "X-MT5-Bridge-Key: <GENERATE_A_NEW_BRIDGE_SECRET>" http://localhost:5001/positions
 ```
 
 ### 5. Query Historical Deals (Authenticated)
 ```powershell
-curl -H "X-MT5-Bridge-Key: 9f870cd5bcde8adaf5d90eb1b7debaeae11da2e6168d1dc700d90ae44b081be8" http://localhost:8000/deals?days=30
+curl -H "X-MT5-Bridge-Key: <GENERATE_A_NEW_BRIDGE_SECRET>" http://localhost:5001/deals?days=30
 ```
 
 ### 6. Query Full Sync Payload
 ```powershell
-curl -H "X-MT5-Bridge-Key: 9f870cd5bcde8adaf5d90eb1b7debaeae11da2e6168d1dc700d90ae44b081be8" http://localhost:8000/sync
+curl -H "X-MT5-Bridge-Key: <GENERATE_A_NEW_BRIDGE_SECRET>" http://localhost:5001/sync
 ```
 
 ---

@@ -36,7 +36,7 @@ MT5_LOGIN = os.getenv("MT5_LOGIN")
 MT5_PASSWORD = os.getenv("MT5_PASSWORD")
 MT5_SERVER = os.getenv("MT5_SERVER")
 MT5_PATH = os.getenv("MT5_PATH")
-MT5_BRIDGE_SECRET = os.getenv("MT5_BRIDGE_SECRET", "nova_mt5_bridge_secret_ld4")
+MT5_BRIDGE_SECRET = os.getenv("MT5_BRIDGE_SECRET", "")
 DEFAULT_INTERVAL = int(os.getenv("SYNC_INTERVAL_SECONDS", "10"))
 
 
@@ -44,6 +44,10 @@ def push_to_nova_backend(payload: dict) -> bool:
     """
     Transmits the MT5 snapshot to the NOVA Node.js/Express backend webhook.
     """
+    if len(MT5_BRIDGE_SECRET) < 32:
+        print("[ERROR] MT5_BRIDGE_SECRET must be configured with at least 32 characters.")
+        return False
+
     url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
     headers = {
         "Content-Type": "application/json",
@@ -85,12 +89,12 @@ def run_sync_cycle(connector: MT5Connector) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="NOVA MT5 Synchronization & Bridge Service")
     parser.add_argument("--server", action="store_true", help="Launch HTTP REST Bridge Server for backend pull queries")
-    parser.add_argument("--port", type=int, default=int(os.getenv("MT5_CONNECTOR_PORT") or os.getenv("PORT") or 8000), help="Bridge server port (default: 8000)")
+    parser.add_argument("--port", type=int, default=int(os.getenv("MT5_CONNECTOR_PORT") or os.getenv("PORT") or 5001), help="Bridge server port (default: 5001)")
     parser.add_argument("--once", action="store_true", help="Perform a single sync push and exit")
     parser.add_argument("--watch", action="store_true", help="Run continuously in polling watch mode")
     parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL, help="Polling interval in seconds")
     parser.add_argument("--login", type=int, default=int(MT5_LOGIN) if MT5_LOGIN else None, help="MT5 Account Number")
-    parser.add_argument("--password", type=str, default=MT5_PASSWORD, help="MT5 Password (Investor or Master)")
+    parser.add_argument("--password", type=str, default=MT5_PASSWORD, help="MT5 read-only Investor Password")
     parser.add_argument("--server-name", type=str, default=MT5_SERVER, help="MT5 Broker Server Name")
     parser.add_argument("--path", type=str, default=MT5_PATH, help="Path to terminal64.exe")
 
@@ -117,7 +121,7 @@ def main():
         print("    MT5_PASSWORD=<read_only_investor_password>")
         print("    MT5_SERVER=<broker_server_name>")
         print("Or run the HTTP Bridge Server:")
-        print("    python sync.py --server --port 8000")
+        print("    python sync.py --server --port 5001")
         print("=" * 70)
         sys.exit(1)
 

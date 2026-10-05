@@ -3,27 +3,19 @@ import {
   calculateAccountMetricsFromTrades,
   DEFAULT_MT5_CONFIG,
   DlmRule,
-  generatePastTradesForAccount,
   INITIAL_DLM_RULES,
-  INITIAL_PROP_ACCOUNTS,
-  INITIAL_TRADES,
   Mt5BridgeConfig,
   NavSection,
   PropAccount,
   TradeExecution,
 } from './data/terminalData';
 import { OverviewScreen } from './components/OverviewScreen';
-import { TradingScreen } from './components/TradingScreen';
 import { TradeJournalScreen } from './components/TradeJournalScreen';
 import {
   AccountsScreen,
-  AiAssistantScreen,
   AnalyticsScreen,
-  FinanceScreen,
-  GoalsScreen,
   SettingsScreen,
 } from './components/SecondaryScreens';
-import { Mt5ConnectModal } from './components/Mt5ConnectModal';
 import { Mt5ImportModal } from './components/Mt5ImportModal';
 import { ApiClient } from './services/apiClient.ts';
 
@@ -42,12 +34,6 @@ const NAV_ITEMS: Array<{
 }> = [
   { id: 'overview', label: 'Overview', icon: 'dashboard', hoverColor: 'group-hover:text-purple-300' },
   {
-    id: 'trading',
-    label: 'Trading',
-    icon: 'candlestick_chart',
-    hoverColor: 'group-hover:text-cyan-400',
-  },
-  {
     id: 'trade-journal',
     label: 'Trade Journal',
     icon: 'auto_stories',
@@ -65,70 +51,40 @@ const NAV_ITEMS: Array<{
     icon: 'account_balance',
     hoverColor: 'group-hover:text-amber-400',
   },
-  { id: 'goals', label: 'Goals', icon: 'flag', hoverColor: 'group-hover:text-sky-400' },
-  {
-    id: 'finance',
-    label: 'Finance',
-    icon: 'account_balance_wallet',
-    hoverColor: 'group-hover:text-teal-400',
-  },
-  {
-    id: 'ai-assistant',
-    label: 'AI Assistant',
-    icon: 'psychology',
-    hoverColor: 'group-hover:text-purple-300',
-    badge: 'AI',
-  },
   { id: 'settings', label: 'Settings', icon: 'tune', hoverColor: 'group-hover:text-slate-200' },
 ];
+
+const SYNTHETIC_TRADE_IDS = new Set(
+  Array.from({ length: 10 }, (_, index) => `MT5-${920000 + index * 314}`)
+);
+
+function loadSavedTrades(): TradeExecution[] {
+  try {
+    const saved = localStorage.getItem('nova_mt5_trades');
+    if (!saved) return [];
+    const parsed = JSON.parse(saved) as TradeExecution[];
+    return parsed.filter(
+      (trade) => !SYNTHETIC_TRADE_IDS.has(trade.id) && !/^TX-\d+$/.test(trade.id) && !/^mt5-\d+$/i.test(trade.accountId || '')
+    );
+  } catch {
+    return [];
+  }
+}
 
 export default function App() {
   const [activeNav, setActiveNav] = useState<NavSection>('overview');
 
   // Load from localStorage or defaults
-  const [accounts, setAccounts] = useState<PropAccount[]>(() => {
-    try {
-      const saved = localStorage.getItem('nova_mt5_accounts');
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_PROP_ACCOUNTS;
-  });
+  const [accounts, setAccounts] = useState<PropAccount[]>([]);
 
-  const [activeAccountId, setActiveAccountId] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem('nova_mt5_active_id');
-      if (saved) return saved;
-    } catch {
-      // ignore
-    }
-    return accounts[0]?.id || 'mt5-real-primary';
-  });
+  const [activeAccountId, setActiveAccountId] = useState<string>('');
 
-  const [trades, setTrades] = useState<TradeExecution[]>(() => {
-    try {
-      const saved = localStorage.getItem('nova_mt5_trades');
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_TRADES;
-  });
+  const [trades, setTrades] = useState<TradeExecution[]>(loadSavedTrades);
 
-  const [mt5Config, setMt5Config] = useState<Mt5BridgeConfig>(() => {
-    try {
-      const saved = localStorage.getItem('nova_mt5_config');
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return DEFAULT_MT5_CONFIG;
-  });
+  const [mt5Config, setMt5Config] = useState<Mt5BridgeConfig>(DEFAULT_MT5_CONFIG);
 
   const [dlmRules, setDlmRules] = useState<DlmRule[]>(INITIAL_DLM_RULES);
   const [selectedTrade, setSelectedTrade] = useState<TradeExecution | null>(null);
-  const [isConnectModalOpen, setIsConnectModalOpen] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [targetImportAccount, setTargetImportAccount] = useState<PropAccount | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -144,8 +100,9 @@ export default function App() {
   // Initial load from backend API
   useEffect(() => {
     ApiClient.getAccounts().then((backendAccounts) => {
-      if (backendAccounts && backendAccounts.length > 0) {
-        const mapped: PropAccount[] = backendAccounts.map((a: any) => ({
+      if (backendAccounts) {
+        const connectedAccounts = backendAccounts.filter((a: any) => a.connection_status === 'CONNECTED');
+        const mapped: PropAccount[] = connectedAccounts.map((a: any) => ({
           id: a.id,
           name: a.account_name,
           ref: `#${a.account_number}-${(a.broker_name || 'FP').slice(0, 2).toUpperCase()}`,
@@ -178,8 +135,19 @@ export default function App() {
           tradeCount: a.trades_count || 0,
         }));
         setAccounts(mapped);
-        if (backendAccounts[0]?.last_synced_at) {
-          setLastSyncedTime(backendAccounts[0].last_synced_at);
+        setActiveAccountId(mapped[0]?.id || '');
+        if (connectedAccounts[0]) {
+          const account = connectedAccounts[0];
+          setMt5Config({
+            ...DEFAULT_MT5_CONFIG,
+            isConnected: true,
+            loginId: String(account.account_number),
+            broker: account.broker_name,
+            server: account.server_name,
+            phase: account.prop_phase?.phase_name || '',
+            baseBalance: Number(account.starting_balance),
+          });
+          setLastSyncedTime(account.last_synced_at || null);
         }
       }
     });
@@ -189,30 +157,27 @@ export default function App() {
         const mapped: TradeExecution[] = backendTrades.map((t: any) => ({
           id: `MT5-${t.primary_ticket || t.id}`,
           accountId: t.trading_account_id,
-          time: t.opened_at
-            ? new Date(t.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : 'Recent',
+          time: t.opened_at ? new Date(t.opened_at).toLocaleString() : 'Time unavailable',
           instrument: t.symbol,
           side: t.direction,
-          entry: t.entry_price?.toString() || '0',
+          entry: t.entry_price?.toString() || '',
           exit: t.exit_price?.toString(),
-          lots: t.volume?.toString() || '0.25',
+          lots: t.volume?.toString() || '',
           outcome: t.outcome,
           rMultiple: `${t.r_multiple >= 0 ? '+' : ''}${t.r_multiple}R`,
           rValue: Number(t.r_multiple),
           netPnl: `${t.net_profit >= 0 ? '+' : '-'}$${Math.abs(t.net_profit).toFixed(2)}`,
           pnlValue: Number(t.net_profit),
-          quality:
-            t.confluences?.setup_quality || (t.outcome === 'WIN' ? 'A+ DLM Sweep' : 'B- Setup'),
-          discipline: t.confluences?.discipline_score
-            ? `${t.confluences.discipline_score}% (${t.confluences.rules_followed_count || 6}/6)`
-            : '100% (6/6)',
-          disciplineScore: t.confluences?.discipline_score || 100,
-          session: t.session_window || 'London / NY Overlap',
-          holdDuration: t.hold_duration || '24 mins',
-          fees: `-$${(t.commission || 1.7).toFixed(2)}`,
-          notes: t.confluences?.notes || t.comment || 'MT5 trade execution',
-          rulesPassed: t.confluences?.rules_followed_count || 6,
+          quality: t.confluences?.setup_quality || 'Not reviewed',
+          discipline: t.confluences?.discipline_score != null
+            ? `${t.confluences.discipline_score}% (${t.confluences.rules_followed_count || 0}/6)`
+            : 'Not reviewed',
+          disciplineScore: Number(t.confluences?.discipline_score || 0),
+          session: t.session_window || 'Unknown',
+          holdDuration: t.hold_duration || 'Unknown',
+          fees: t.commission != null ? `${Number(t.commission).toFixed(2)}` : 'Not reported',
+          notes: t.confluences?.notes || t.comment || '',
+          rulesPassed: Number(t.confluences?.rules_followed_count || 0),
         }));
         setTrades(mapped);
       }
@@ -227,30 +192,6 @@ export default function App() {
       // ignore
     }
   }, [trades]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('nova_mt5_accounts', JSON.stringify(accounts));
-    } catch {
-      // ignore
-    }
-  }, [accounts]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('nova_mt5_active_id', activeAccountId);
-    } catch {
-      // ignore
-    }
-  }, [activeAccountId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('nova_mt5_config', JSON.stringify(mt5Config));
-    } catch {
-      // ignore
-    }
-  }, [mt5Config]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -270,8 +211,7 @@ export default function App() {
     return `${hrs}:${mins}:${secs}`;
   };
 
-  const activeAccount =
-    accounts.find((a) => a.id === activeAccountId) || accounts[0];
+  const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0];
 
   const handleToggleRule = (ruleId: string) => {
     setDlmRules((prev) =>
@@ -280,6 +220,7 @@ export default function App() {
   };
 
   const handleAddTrade = (newTrade: TradeExecution) => {
+    if (!activeAccount) return;
     setTrades((prev) => [newTrade, ...prev]);
     if (newTrade.pnlValue !== 0) {
       setAccounts((prev) =>
@@ -313,66 +254,6 @@ export default function App() {
     }
   };
 
-  const handleExecuteOrder = (order: {
-    instrument: 'XAUUSD' | 'EURUSD' | 'US100' | 'GBPUSD';
-    side: 'BUY' | 'SELL';
-    entry: string;
-    lots: string;
-    riskDollars: number;
-    targetR: number;
-  }) => {
-    const profit = Number((order.riskDollars * order.targetR).toFixed(2));
-    const passedRules = dlmRules.filter((r) => r.passed).length;
-    const isFullCompliance = passedRules === dlmRules.length;
-
-    const newExecution: TradeExecution = {
-      id: `TX-${Math.floor(88425 + Math.random() * 900)}`,
-      time: `Today ${formatUtcClock(utcSeconds).slice(0, 5)}`,
-      instrument: order.instrument,
-      side: order.side,
-      entry: order.entry,
-      lots: order.lots,
-      outcome: 'WIN',
-      rMultiple: `+${order.targetR.toFixed(1)}R`,
-      rValue: order.targetR,
-      netPnl: `+$${profit.toFixed(2)}`,
-      pnlValue: profit,
-      quality: isFullCompliance ? 'A+ DLM Sweep' : 'B+ Manual Entry',
-      discipline: isFullCompliance
-        ? `100% (${passedRules}/6)`
-        : `${Math.round((passedRules / 6) * 100)}% (${passedRules}/6)`,
-      disciplineScore: isFullCompliance ? 100 : Math.round((passedRules / 6) * 100),
-      session: 'London / NY Overlap',
-      holdDuration: '18 mins',
-      fees: '-$1.70',
-      notes: `Executed ${order.lots} lots ${order.instrument} ${order.side} @ ${order.entry} via LD4 Bridge.`,
-      rulesPassed: passedRules,
-    };
-
-    handleAddTrade(newExecution);
-  };
-
-  const handleConnectMt5Account = (
-    newAccount: PropAccount,
-    newConfig: Mt5BridgeConfig,
-    pastTrades?: TradeExecution[]
-  ) => {
-    setAccounts((prev) => {
-      const filtered = prev.filter((a) => a.id !== newAccount.id);
-      return [newAccount, ...filtered];
-    });
-    setActiveAccountId(newAccount.id);
-    setMt5Config(newConfig);
-
-    if (pastTrades && pastTrades.length > 0) {
-      setTrades((prev) => {
-        const existingIds = new Set(prev.map((t) => t.id));
-        const filteredNew = pastTrades.filter((t) => !existingIds.has(t.id));
-        return [...filteredNew, ...prev];
-      });
-    }
-  };
-
   const handleDeleteAccount = (accountId: string) => {
     const remaining = accounts.filter((a) => a.id !== accountId);
     setAccounts(remaining);
@@ -383,62 +264,14 @@ export default function App() {
       if (remaining.length > 0) {
         setActiveAccountId(remaining[0].id);
       } else {
-        // Fallback default clean starter account if all accounts deleted
-        const freshAccount: PropAccount = {
-          id: 'mt5-clean-primary',
-          name: 'Primary MT5 Terminal',
-          ref: '#REAL-MT5',
-          shortRef: 'MT5 Terminal',
-          bridge: 'London LD4 Server',
-          phase: 'Phase 1',
-          baseBalance: 10000.0,
-          currentBalance: 10000.0,
-          liveEquity: 10000.0,
-          floatingPnl: 0,
-          netProfit: 0,
-          roiPercent: 0,
-          targetProfit: 600.0,
-          targetPercent: 6.0,
-          passThreshold: 10600.0,
-          dailyLimit: 500.0,
-          currentDailyDrawdown: 0,
-          maxLossLimit: 1000.0,
-          currentMaxDrawdown: 0,
-          peakWater: 10000.0,
-          status: 'SAFE',
-          isRealConnected: false,
-        };
-        setAccounts([freshAccount]);
-        setActiveAccountId(freshAccount.id);
+        setActiveAccountId('');
       }
     }
   };
 
-  const handleSyncPastTradesForAccount = (accountId: string, count: number = 5) => {
-    const targetAccount = accounts.find((a) => a.id === accountId) || activeAccount;
-    if (!targetAccount) return;
-
-    const newPastTrades = generatePastTradesForAccount(targetAccount, count);
-
-    setTrades((prev) => {
-      const existingIds = new Set(prev.map((t) => t.id));
-      const filteredNew = newPastTrades.filter((t) => !existingIds.has(t.id));
-      const allUpdated = [...filteredNew, ...prev];
-
-      // Recalculate target account balance & stats
-      const thisAccountTrades = allUpdated.filter((t) => t.accountId === targetAccount.id);
-      const updatedAccount = calculateAccountMetricsFromTrades(targetAccount, thisAccountTrades);
-
-      setAccounts((prevAccs) =>
-        prevAccs.map((acc) => (acc.id === targetAccount.id ? updatedAccount : acc))
-      );
-
-      return allUpdated;
-    });
-  };
-
   const handleImportTrades = (importedTrades: TradeExecution[], newBalance?: number) => {
     const target = targetImportAccount || activeAccount;
+    if (!target) return;
     const taggedTrades = importedTrades.map((t) => ({
       ...t,
       accountId: target.id,
@@ -458,6 +291,7 @@ export default function App() {
   };
 
   const handleDeleteTrade = (tradeId: string) => {
+    if (!activeAccount) return;
     setTrades((prev) => {
       const updated = prev.filter((t) => t.id !== tradeId);
       const thisAccountTrades = updated.filter((t) => t.accountId === activeAccount.id);
@@ -473,19 +307,8 @@ export default function App() {
 
   const handleClearAllData = () => {
     setTrades([]);
-    setAccounts([
-      {
-        ...activeAccount,
-        currentBalance: activeAccount.baseBalance,
-        liveEquity: activeAccount.baseBalance,
-        floatingPnl: 0,
-        netProfit: 0,
-        roiPercent: 0,
-        currentDailyDrawdown: 0,
-        currentMaxDrawdown: 0,
-        peakWater: activeAccount.baseBalance,
-      },
-    ]);
+    setAccounts([]);
+    setActiveAccountId('');
     try {
       localStorage.removeItem('nova_mt5_trades');
     } catch {
@@ -493,97 +316,130 @@ export default function App() {
     }
   };
 
-  const handleSyncFromHeader = async () => {
+  const handleSyncFromHeader = async (requestedAccountId?: string) => {
     setIsSyncing(true);
     try {
-      const res = await ApiClient.syncAccount(activeAccount.id);
-      const nowIso = new Date().toISOString();
-      setLastSyncedTime(nowIso);
+      const res = requestedAccountId
+        ? await ApiClient.syncAccount(requestedAccountId)
+        : await ApiClient.syncMT5();
 
-      const backendAccounts = await ApiClient.getAccounts();
-      if (backendAccounts && backendAccounts.length > 0) {
-        const mapped: PropAccount[] = backendAccounts.map((a: any) => ({
+      if (res.success) {
+        setLastSyncedTime(res.synced_at || new Date().toISOString());
+        const backendAccounts = await ApiClient.getAccounts();
+        const connectedAccounts = backendAccounts.filter((a: any) => a.connection_status === 'CONNECTED');
+        const mappedAccounts: PropAccount[] = connectedAccounts.map((a: any) => ({
           id: a.id,
           name: a.account_name,
-          ref: `#${a.account_number}-${(a.broker_name || 'FP').slice(0, 2).toUpperCase()}`,
+          ref: `#${a.account_number}-${(a.broker_name || '').slice(0, 2).toUpperCase()}`,
           shortRef: `${a.broker_name} #${a.account_number}`,
-          bridge: `${a.server_name} • LD4 Bridge`,
+          bridge: a.server_name,
           phase: a.prop_phase?.phase_name || 'Phase 1',
           baseBalance: Number(a.starting_balance),
           currentBalance: Number(a.current_balance),
           liveEquity: Number(a.current_equity),
           floatingPnl: Number((a.current_equity - a.current_balance).toFixed(2)),
           netProfit: Number((a.current_balance - a.starting_balance).toFixed(2)),
-          roiPercent:
-            a.starting_balance > 0
-              ? Number(
-                  (((a.current_balance - a.starting_balance) / a.starting_balance) * 100).toFixed(2)
-                )
-              : 0,
-          targetProfit: Number(a.prop_phase?.profit_target_amount || a.starting_balance * 0.06),
-          targetPercent: Number(a.prop_phase?.profit_target_percent || 6),
-          passThreshold: Number(
-            a.starting_balance + (a.prop_phase?.profit_target_amount || a.starting_balance * 0.06)
-          ),
-          dailyLimit: Number(a.prop_firm?.daily_loss_limit || a.starting_balance * 0.05),
+          roiPercent: a.starting_balance > 0
+            ? Number((((a.current_balance - a.starting_balance) / a.starting_balance) * 100).toFixed(2))
+            : 0,
+          targetProfit: Number(a.prop_phase?.profit_target_amount || 0),
+          targetPercent: Number(a.prop_phase?.profit_target_percent || 0),
+          passThreshold: Number(a.prop_phase?.pass_threshold || 0),
+          dailyLimit: Number(a.prop_firm?.daily_loss_limit || 0),
           currentDailyDrawdown: Number(a.prop_firm?.current_daily_drawdown || 0),
-          maxLossLimit: Number(a.prop_firm?.max_loss_limit || a.starting_balance * 0.1),
+          maxLossLimit: Number(a.prop_firm?.max_loss_limit || 0),
           currentMaxDrawdown: Number(a.prop_firm?.current_max_drawdown || 0),
-          peakWater: Number(a.prop_firm?.peak_watermark || a.starting_balance),
+          peakWater: Number(a.prop_firm?.peak_watermark || 0),
           status: (a.prop_firm?.breach_status as any) || 'SAFE',
           isRealConnected: a.connection_status === 'CONNECTED',
           tradeCount: a.trades_count || 0,
         }));
-        setAccounts(mapped);
-      }
+        setAccounts(mappedAccounts);
+        setActiveAccountId(
+          mappedAccounts.find((a) => a.id === requestedAccountId)?.id || mappedAccounts[0]?.id || ''
+        );
+        const firstConnected = connectedAccounts[0];
+        if (firstConnected) {
+          setMt5Config({
+            ...DEFAULT_MT5_CONFIG,
+            isConnected: true,
+            loginId: String(firstConnected.account_number),
+            broker: firstConnected.broker_name,
+            server: firstConnected.server_name,
+            phase: firstConnected.prop_phase?.phase_name || '',
+            baseBalance: Number(firstConnected.starting_balance),
+          });
+        }
 
-      const backendTrades = await ApiClient.getTrades(activeAccount.id);
-      if (backendTrades && backendTrades.length > 0) {
-        const mapped: TradeExecution[] = backendTrades.map((t: any) => ({
+        const backendTrades = await ApiClient.getTrades(requestedAccountId);
+        const mappedTrades: TradeExecution[] = backendTrades.map((t: any) => ({
           id: `MT5-${t.primary_ticket || t.id}`,
           accountId: t.trading_account_id,
-          time: t.opened_at
-            ? new Date(t.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : 'Recent',
+          time: t.opened_at ? new Date(t.opened_at).toLocaleString() : 'Time unavailable',
           instrument: t.symbol,
           side: t.direction,
-          entry: t.entry_price?.toString() || '0',
+          entry: t.entry_price?.toString() || '',
           exit: t.exit_price?.toString(),
-          lots: t.volume?.toString() || '0.25',
+          lots: t.volume?.toString() || '',
           outcome: t.outcome,
           rMultiple: `${t.r_multiple >= 0 ? '+' : ''}${t.r_multiple}R`,
           rValue: Number(t.r_multiple),
           netPnl: `${t.net_profit >= 0 ? '+' : '-'}$${Math.abs(t.net_profit).toFixed(2)}`,
           pnlValue: Number(t.net_profit),
-          quality:
-            t.confluences?.setup_quality || (t.outcome === 'WIN' ? 'A+ DLM Sweep' : 'B- Setup'),
-          discipline: t.confluences?.discipline_score
-            ? `${t.confluences.discipline_score}% (${t.confluences.rules_followed_count || 6}/6)`
-            : '100% (6/6)',
-          disciplineScore: t.confluences?.discipline_score || 100,
-          session: t.session_window || 'London / NY Overlap',
-          holdDuration: t.hold_duration || '24 mins',
-          fees: `-$${(t.commission || 1.7).toFixed(2)}`,
-          notes: t.confluences?.notes || t.comment || 'MT5 trade execution',
-          rulesPassed: t.confluences?.rules_followed_count || 6,
+          quality: t.confluences?.setup_quality || 'Not reviewed',
+          discipline: t.confluences?.discipline_score != null
+            ? `${t.confluences.discipline_score}% (${t.confluences.rules_followed_count || 0}/6)`
+            : 'Not reviewed',
+          disciplineScore: Number(t.confluences?.discipline_score || 0),
+          session: t.session_window || 'Unknown',
+          holdDuration: t.hold_duration || 'Unknown',
+          fees: t.commission != null ? `${Number(t.commission).toFixed(2)}` : 'Not reported',
+          notes: t.confluences?.notes || t.comment || '',
+          rulesPassed: Number(t.confluences?.rules_followed_count || 0),
         }));
-        setTrades(mapped);
+        setTrades(mappedTrades);
       }
 
       setSyncToast({
         success: res.success,
-        message: res.message || (res.success ? 'Account and trade history synced from MT5.' : 'Sync complete.'),
+        message: res.message || (res.success ? 'MT5 data synced.' : 'MT5 sync failed.'),
       });
     } catch (err) {
       setSyncToast({
         success: false,
-        message: (err as Error).message || 'Failed to reach MT5 connector.',
+        message: (err as Error).message || 'Failed to reach the MT5 connector.',
       });
     } finally {
       setIsSyncing(false);
       setTimeout(() => setSyncToast(null), 5000);
     }
   };
+  if (!activeAccount) {
+    return (
+      <main className="min-h-screen bg-[#08090d] text-slate-100 flex items-center justify-center p-6">
+        <section className="max-w-lg w-full rounded-2xl border border-white/10 bg-[#11141e] p-8 text-center">
+          <h1 className="text-xl font-bold text-white">No MT5 account data yet</h1>
+          <p className="mt-3 text-sm text-slate-300">
+            NOVA will show an account after the local MT5 connector authenticates and sends a snapshot.
+            Check the connector settings and use an Investor Password for read-only access.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleSyncFromHeader()}
+            disabled={isSyncing}
+            className="mt-6 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {isSyncing ? 'Syncing MT5…' : 'Sync from MT5'}
+          </button>
+          {syncToast && (
+            <p className={`mt-4 text-sm ${syncToast.success ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {syncToast.message}
+            </p>
+          )}
+        </section>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#08090d] text-slate-100 antialiased selection:bg-purple-500/30 selection:text-white">
@@ -677,8 +533,8 @@ export default function App() {
 
         {/* Institutional MT5 Connectivity Badge Card */}
         <div
-          onClick={() => setIsConnectModalOpen(true)}
-          title="Click to configure or connect real MT5 Account"
+          onClick={() => void handleSyncFromHeader()}
+          title="Sync from the configured MT5 connector"
           className="p-3 m-3 rounded-xl bg-gradient-to-b from-[#111420] to-[#0a0c12] border border-white/[0.08] shadow-[0_8px_20px_rgba(0,0,0,0.5)] relative overflow-hidden cursor-pointer hover:border-purple-500/40 transition-all group"
         >
           <div className="absolute -right-6 -bottom-6 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none"></div>
@@ -689,18 +545,18 @@ export default function App() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
               </span>
               <span className="font-label-tech text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                {mt5Config.isConnected ? 'MT5 Connected (Live)' : 'Connect Real MT5'}
+                {activeAccount.isRealConnected ? 'MT5 Connected' : 'MT5 Disconnected'}
               </span>
             </div>
             <span className="font-label-numeric-sm text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-slate-400 font-medium">
-              LD4
+              READ ONLY
             </span>
           </div>
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="font-label-numeric-sm text-[11px] text-slate-300 flex items-center gap-1">
               <span className="text-emerald-400 font-bold">{mt5Config.latencyMs}ms</span>
               <span className="text-slate-500">•</span>
-              London Equinix
+              MT5 status
             </span>
             <span className="font-label-tech text-[9px] px-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
               ULTRA-LOW
@@ -725,7 +581,7 @@ export default function App() {
               </span>
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-label-tech text-[10px] font-semibold tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.2)]">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                SYSTEM ARMED
+                {activeAccount.isRealConnected ? 'MT5 CONNECTED' : 'MT5 DISCONNECTED'}
               </span>
             </div>
             <span className="font-body-sm text-[11px] text-slate-400 font-normal mt-0.5 flex items-center gap-1.5">
@@ -734,7 +590,7 @@ export default function App() {
               <span className="text-slate-600">•</span>
               <span className="text-rose-400 font-medium flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
-                High Volatility Expected
+                Live market conditions unavailable
               </span>
             </span>
           </div>
@@ -753,13 +609,13 @@ export default function App() {
                 </span>
               </div>
               <div
-                onClick={() => setIsConnectModalOpen(true)}
-                title="Click to configure live MT5 Bridge"
+                onClick={() => void handleSyncFromHeader()}
+                title="Sync data from MT5"
                 className="flex items-center gap-2 bg-white/[0.03] border border-white/[0.06] hover:border-purple-500/30 px-3 py-1.5 rounded-lg cursor-pointer transition-all"
               >
                 <span className="h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8]"></span>
                 <span className="font-label-tech text-[11px] text-slate-300 font-medium">
-                  {mt5Config.isConnected ? `${mt5Config.server} / Bridge Online` : 'Configure Real MT5 Bridge'}
+                  {activeAccount.isRealConnected ? `${activeAccount.bridge} / Connected` : 'MT5 Disconnected'}
                 </span>
               </div>
             </div>
@@ -853,7 +709,7 @@ export default function App() {
                     </span>
                   </div>
                   <span className="font-label-tech text-[9px] text-purple-300 uppercase tracking-wider font-semibold mt-0.5 leading-none">
-                    Apex Funded Trader
+                    NOVA account
                   </span>
                 </div>
                 <span className="material-symbols-outlined text-slate-500 text-sm leading-none ml-0.5">
@@ -927,11 +783,11 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setShowProfileMenu(false);
-                        setIsConnectModalOpen(true);
+                        void handleSyncFromHeader();
                       }}
                       className="mt-2 py-2 px-3 rounded-lg bg-purple-600/30 border border-purple-500/40 hover:bg-purple-600/50 text-purple-200 font-label-tech text-xs font-bold text-center"
                     >
-                      + Connect Real MT5 Account
+                      Sync MT5
                     </button>
                   </div>
                 </div>
@@ -945,29 +801,12 @@ export default function App() {
             <OverviewScreen
               activeAccount={activeAccount}
               trades={trades}
-              dlmRules={dlmRules}
-              onToggleRule={handleToggleRule}
-              onNavigate={(section) => setActiveNav(section)}
-              onSelectTrade={(trade) => {
-                setSelectedTrade(trade);
-                setActiveNav('trade-journal');
-              }}
-              onQuickExecute={() => setActiveNav('trading')}
-              onOpenConnectModal={() => setIsConnectModalOpen(true)}
-              onSyncPastTrades={() => handleSyncPastTradesForAccount(activeAccount.id, 5)}
+              onSync={() => void handleSyncFromHeader(activeAccount.id)}
               onOpenImportModal={() => {
                 setTargetImportAccount(activeAccount);
                 setIsImportModalOpen(true);
               }}
-            />
-          )}
-
-          {activeNav === 'trading' && (
-            <TradingScreen
-              activeAccount={activeAccount}
-              dlmRules={dlmRules}
-              onToggleRule={handleToggleRule}
-              onExecuteOrder={handleExecuteOrder}
+              onNavigateToJournal={() => setActiveNav('trade-journal')}
             />
           )}
 
@@ -981,7 +820,7 @@ export default function App() {
               onSelectTrade={setSelectedTrade}
               onAddTrade={handleAddTrade}
               onDeleteTrade={handleDeleteTrade}
-              onSyncPastTrades={handleSyncPastTradesForAccount}
+              onSyncPastTrades={(id) => void handleSyncFromHeader(id)}
               onOpenImportModal={() => {
                 setTargetImportAccount(activeAccount);
                 setIsImportModalOpen(true);
@@ -1000,9 +839,9 @@ export default function App() {
                 setActiveAccountId(id);
                 setActiveNav('overview');
               }}
-              onOpenConnectModal={() => setIsConnectModalOpen(true)}
+              onOpenConnectModal={() => void handleSyncFromHeader()}
               onDeleteAccount={handleDeleteAccount}
-              onSyncPastTrades={handleSyncPastTradesForAccount}
+              onSyncPastTrades={(id) => void handleSyncFromHeader(id)}
               onOpenImportModal={(acc) => {
                 setTargetImportAccount(acc);
                 setIsImportModalOpen(true);
@@ -1014,38 +853,18 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'goals' && <GoalsScreen activeAccount={activeAccount} />}
-
-          {activeNav === 'finance' && <FinanceScreen activeAccount={activeAccount} />}
-
-          {activeNav === 'ai-assistant' && (
-            <AiAssistantScreen trades={trades} activeAccount={activeAccount} />
-          )}
-
           {activeNav === 'settings' && (
             <SettingsScreen
               dlmRules={dlmRules}
               onToggleRule={handleToggleRule}
               activeAccount={activeAccount}
               mt5Config={mt5Config}
-              onOpenConnectModal={() => setIsConnectModalOpen(true)}
+              onOpenConnectModal={() => void handleSyncFromHeader()}
               onClearData={handleClearAllData}
             />
           )}
         </main>
       </div>
-
-      {/* MT5 Account Connection Dialog */}
-      <Mt5ConnectModal
-        isOpen={isConnectModalOpen}
-        currentConfig={mt5Config}
-        onClose={() => setIsConnectModalOpen(false)}
-        onConnect={handleConnectMt5Account}
-        onOpenImportModal={() => {
-          setTargetImportAccount(activeAccount);
-          setIsImportModalOpen(true);
-        }}
-      />
 
       {/* MT5 Statement File / Past Deals Importer */}
       <Mt5ImportModal

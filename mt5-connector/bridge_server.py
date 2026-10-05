@@ -42,8 +42,8 @@ logger = logging.getLogger("NOVA-MT5-Bridge")
 
 # Configuration from Environment Variables
 PORT = int(os.getenv("MT5_CONNECTOR_PORT") or os.getenv("PORT") or 5001)
-HOST = os.getenv("MT5_CONNECTOR_HOST", "0.0.0.0")
-MT5_BRIDGE_SECRET = os.getenv("MT5_BRIDGE_SECRET", "nova_mt5_bridge_secret_ld4")
+HOST = os.getenv("MT5_CONNECTOR_HOST", "127.0.0.1")
+MT5_BRIDGE_SECRET = os.getenv("MT5_BRIDGE_SECRET", "")
 NOVA_BACKEND_URL = os.getenv("NOVA_BACKEND_URL", "http://localhost:3000")
 
 # Shared connector singleton
@@ -94,7 +94,7 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
         if not bridge_key:
             return False
 
-        return bridge_key == MT5_BRIDGE_SECRET
+        return bool(MT5_BRIDGE_SECRET) and bridge_key == MT5_BRIDGE_SECRET
 
     def do_OPTIONS(self):
         """Handle CORS pre-flight requests."""
@@ -119,8 +119,6 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
                     "service": "NOVA MetaTrader 5 Python Bridge",
                     "mode": "READ_ONLY",
                     "mt5_connected": connector.is_connected,
-                    "account_number": connector.login,
-                    "server": connector.server,
                     "trading_disabled": True,
                     "security": "Enforced (X-MT5-Bridge-Key required for data)",
                 },
@@ -282,13 +280,15 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
 
 
 def start_server():
+    if len(MT5_BRIDGE_SECRET) < 32:
+        raise RuntimeError("Set MT5_BRIDGE_SECRET to a random value at least 32 characters long.")
     server_address = (HOST, PORT)
     httpd = ThreadingHTTPServer(server_address, MT5BridgeRequestHandler)
     print("=" * 72)
     print("  NOVA INTELLIGENCE OS — METATRADER 5 PYTHON BRIDGE (READ-ONLY)")
     print("=" * 72)
     print(f"  • Bridge Server Listening: http://{HOST}:{PORT}")
-    print(f"  • MT5 Bridge Secret:       {'Configured (Active)' if MT5_BRIDGE_SECRET else 'Default'}")
+    print("  • MT5 Bridge Secret:       Configured (Active)")
     print(f"  • Read-Only Endpoints:     /health, /account, /positions, /deals, /sync")
     print(f"  • Safety Mode:             100% Read-Only (Order execution disabled)")
     print("=" * 72)

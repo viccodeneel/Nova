@@ -43,9 +43,10 @@ class MT5Connector:
         simulation_mode: Optional[bool] = None,
     ):
         # Read from arguments or environment variables
-        self.login = int(login or os.getenv("MT5_LOGIN", 884192))
-        self.password = str(password or os.getenv("MT5_PASSWORD", ""))
-        self.server = str(server or os.getenv("MT5_SERVER", "FundingPips-Server"))
+        configured_login = login if login is not None else os.getenv("MT5_LOGIN")
+        self.login = int(configured_login) if configured_login else None
+        self.password = str(password if password is not None else os.getenv("MT5_PASSWORD", ""))
+        self.server = str(server if server is not None else os.getenv("MT5_SERVER", ""))
         self.path = path or os.getenv("MT5_PATH") or None
         self.history_days = int(history_days or os.getenv("HISTORY_DAYS", 30))
 
@@ -53,10 +54,7 @@ class MT5Connector:
         if simulation_mode is not None:
             self.simulation_mode = simulation_mode
         else:
-            self.simulation_mode = (
-                os.getenv("MT5_SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
-                or not MT5_AVAILABLE
-            )
+            self.simulation_mode = os.getenv("MT5_SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
 
         self._is_initialized = False
         self._last_error: Optional[str] = None
@@ -71,10 +69,13 @@ class MT5Connector:
         """
         if self.simulation_mode:
             logger.info(
-                f"[SIMULATION MODE] Initialized MT5 virtual connector for account #{self.login} on '{self.server}'"
+                "[SIMULATION MODE] Initialized virtual MT5 connector; data is synthetic"
             )
             self._is_initialized = True
             return True
+
+        if not self.login or not self.password or not self.server:
+            raise ValueError("MT5_LOGIN, MT5_PASSWORD, and MT5_SERVER must be configured before connecting.")
 
         if not MT5_AVAILABLE:
             error_msg = (
@@ -138,7 +139,8 @@ class MT5Connector:
                 "margin_level": 0.00,
                 "currency": "USD",
                 "leverage": 100,
-                "connection_status": "CONNECTED",
+                "connection_status": "SIMULATED",
+                "data_mode": "SIMULATED",
             }
 
         account_info = mt5.account_info()
@@ -161,6 +163,7 @@ class MT5Connector:
             "currency": str(info.get("currency", "USD")),
             "leverage": int(info.get("leverage", 100)),
             "connection_status": "CONNECTED",
+            "data_mode": "MT5",
         }
 
     def get_open_positions(self) -> List[Dict[str, Any]]:

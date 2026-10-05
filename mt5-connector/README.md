@@ -69,11 +69,11 @@ pip install -r requirements.txt
 ### 3. Configuration
 Create `.env` in `mt5-connector/`:
 ```env
-MT5_LOGIN=884192
+MT5_LOGIN=<YOUR_MT5_ACCOUNT_NUMBER>
 MT5_PASSWORD="YourInvestorPassword"
 MT5_SERVER="FundingPips-Server"
-MT5_BRIDGE_SECRET="9f870cd5bcde8adaf5d90eb1b7debaeae11da2e6168d1dc700d90ae44b081be8"
-MT5_CONNECTOR_PORT=8000
+MT5_BRIDGE_SECRET="<GENERATE_A_NEW_BRIDGE_SECRET>"
+MT5_CONNECTOR_PORT=5001
 NOVA_BACKEND_URL="http://localhost:3000"
 ```
 
@@ -83,7 +83,7 @@ NOVA_BACKEND_URL="http://localhost:3000"
 python bridge_server.py
 
 # Or run via runner
-python sync.py --server --port 8000
+python sync.py --server --port 5001
 ```
 
 For complete step-by-step Windows setup, Windows Task Scheduler configuration, and troubleshooting, see [SETUP_WINDOWS.md](./SETUP_WINDOWS.md).

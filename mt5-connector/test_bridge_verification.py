@@ -11,6 +11,7 @@ Tests:
 
 import json
 import os
+import secrets
 import sys
 import time
 import urllib.request
@@ -21,7 +22,7 @@ from threading import Thread
 os.environ["MT5_SIMULATION_MODE"] = "true"
 os.environ["PORT"] = "5001"
 os.environ["MT5_CONNECTOR_PORT"] = "5001"
-os.environ["MT5_BRIDGE_SECRET"] = "9f870cd5bcde8adaf5d90eb1b7debaeae11da2e6168d1dc700d90ae44b081be8"
+os.environ["MT5_BRIDGE_SECRET"] = secrets.token_urlsafe(32)
 os.environ["NOVA_BACKEND_URL"] = "http://localhost:3000"
 
 from bridge_server import ThreadingHTTPServer, MT5BridgeRequestHandler, HOST, PORT, MT5_BRIDGE_SECRET

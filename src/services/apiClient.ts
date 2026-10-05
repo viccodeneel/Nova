@@ -83,6 +83,24 @@ export class ApiClient {
     }
   }
 
+  public static async syncMT5(): Promise<ApiSyncResult> {
+    try {
+      const res = await fetch(`${this.baseUrl}/connector/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(12000),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      return {
+        success: false,
+        message: 'Could not contact the NOVA backend synchronization service.',
+        error: (err as Error).message,
+      };
+    }
+  }
+
   public static async createAccount(accountData: any): Promise<any | null> {
     try {
       const res = await fetch(`${this.baseUrl}/accounts`, {
