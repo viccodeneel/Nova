@@ -1,0 +1,8 @@
+{
+  "name": "React UI Architect",
+  "description": "Rapidly scaffold and prototype React, TypeScript, and Tailwind CSS interfaces using visual design references and hotlinked assets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
