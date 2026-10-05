@@ -405,12 +405,25 @@ def _watch_and_sync():
             try:
                 import requests
                 webhook_url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
-                requests.post(
+                snapshot = connector.fetch_full_snapshot()
+                response = requests.post(
                     webhook_url,
-                    json=connector.fetch_full_snapshot(),
+                    json=snapshot,
                     headers={"X-MT5-Bridge-Key": MT5_BRIDGE_SECRET},
                     timeout=15,
                 )
+                try:
+                    result = response.json()
+                except ValueError:
+                    result = {}
+                if response.status_code != 200 or not result.get("success"):
+                    reason = result.get("error") or result.get("message") or response.text[:300]
+                    logger.warning(
+                        f"Scheduled MT5 snapshot rejected (HTTP {response.status_code}): {reason}"
+                    )
+                else:
+                    balance = snapshot.get("account", {}).get("balance", "unknown")
+                    logger.info(f"Scheduled MT5 snapshot accepted by NOVA; MT5 balance={balance}")
             except Exception as e:
                 logger.warning(f"Scheduled MT5 sync failed: {e}")
         time.sleep(SYNC_INTERVAL_SECONDS)
