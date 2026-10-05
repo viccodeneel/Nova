@@ -53,6 +53,7 @@ NOVA_FRONTEND_ORIGINS = {
     if origin.strip()
 }
 SYNC_INTERVAL_SECONDS = max(5, int(os.getenv("SYNC_INTERVAL_SECONDS", "10")))
+HISTORY_SYNC_INTERVAL_SECONDS = max(60, int(os.getenv("HISTORY_SYNC_INTERVAL_SECONDS", "300")))
 
 # Shared connector singleton
 _connector: Optional[MT5Connector] = None
@@ -257,7 +258,9 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
 
                 candidate = MT5Connector(login=login, password=password, server=server.strip())
                 candidate.initialize()
-                snapshot = candidate.fetch_full_snapshot()
+                # Keep account connection responsive. Historical deals are fetched
+                # by the scheduled sync after the account snapshot is established.
+                snapshot = candidate.fetch_full_snapshot(include_history=False)
 
                 import requests
                 webhook_url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
@@ -397,7 +400,8 @@ def start_server():
 
 
 def _watch_and_sync():
-    """Push fresh read-only account snapshots while a locally authenticated connector is active."""
+    """Push account/position snapshots frequently and history less often."""
+    last_history_sync = 0.0
     while True:
         with _connector_lock:
             connector = _connector
@@ -405,7 +409,9 @@ def _watch_and_sync():
             try:
                 import requests
                 webhook_url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
-                snapshot = connector.fetch_full_snapshot()
+                now = time.monotonic()
+                include_history = now - last_history_sync >= HISTORY_SYNC_INTERVAL_SECONDS
+                snapshot = connector.fetch_full_snapshot(include_history=include_history)
                 response = requests.post(
                     webhook_url,
                     json=snapshot,
@@ -424,6 +430,8 @@ def _watch_and_sync():
                 else:
                     balance = snapshot.get("account", {}).get("balance", "unknown")
                     logger.info(f"Scheduled MT5 snapshot accepted by NOVA; MT5 balance={balance}")
+                    if include_history:
+                        last_history_sync = now
             except Exception as e:
                 logger.warning(f"Scheduled MT5 sync failed: {e}")
         time.sleep(SYNC_INTERVAL_SECONDS)

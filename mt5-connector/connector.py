@@ -39,7 +39,7 @@ class MT5Connector:
         password: Optional[str] = None,
         server: Optional[str] = None,
         path: Optional[str] = None,
-        history_days: int = 30,
+        history_days: Optional[int] = None,
         simulation_mode: Optional[bool] = None,
     ):
         # Read from arguments or environment variables
@@ -48,7 +48,8 @@ class MT5Connector:
         self.password = str(password if password is not None else os.getenv("MT5_PASSWORD", ""))
         self.server = str(server if server is not None else os.getenv("MT5_SERVER", ""))
         self.path = path or os.getenv("MT5_PATH") or None
-        self.history_days = int(history_days or os.getenv("HISTORY_DAYS", 30))
+        self.history_days = int(history_days if history_days is not None else os.getenv("HISTORY_DAYS", "30"))
+        self.portable = os.getenv("MT5_PORTABLE", "false").lower() in ("true", "1", "yes")
 
         # Check if running in simulation / dev test mode (e.g. on Linux/macOS or CI test)
         if simulation_mode is not None:
@@ -90,6 +91,8 @@ class MT5Connector:
         init_args: Dict[str, Any] = {}
         if self.path:
             init_args["path"] = self.path
+        if self.portable:
+            init_args["portable"] = True
 
         # 1. Initialize terminal connection
         if not mt5.initialize(**init_args):
@@ -259,14 +262,14 @@ class MT5Connector:
 
         return formatted
 
-    def fetch_full_snapshot(self) -> Dict[str, Any]:
+    def fetch_full_snapshot(self, include_history: bool = True) -> Dict[str, Any]:
         """
         Packages account info, positions, and history into a clean payload.
         """
         return {
             "account": self.get_account_snapshot(),
             "positions": self.get_open_positions(),
-            "deals": self.get_recent_deals(),
+            "deals": self.get_recent_deals() if include_history else [],
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         }
 
