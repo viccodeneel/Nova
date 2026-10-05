@@ -430,8 +430,21 @@ async function updatePropPhaseMetrics(accountId: string): Promise<void> {
  * 3. Ingests into PostgreSQL and triggers trade aggregation
  */
 export async function syncMT5Account(accountId?: string): Promise<SyncResult> {
-  const connectorUrl = process.env.MT5_CONNECTOR_URL || 'http://localhost:5001';
+  const connectorUrl = process.env.MT5_CONNECTOR_URL?.trim();
   const bridgeSecret = process.env.MT5_BRIDGE_SECRET;
+  if (!connectorUrl) {
+    return {
+      success: false,
+      message: 'No reachable MT5 connector is configured. A cloud backend cannot pull from a connector running on your local computer; run the local connector in push mode.',
+      account_id: accountId || '',
+      account_number: 0,
+      positions_synced: 0,
+      deals_synced: 0,
+      trades_created_or_updated: 0,
+      synced_at: new Date().toISOString(),
+      error: 'CONNECTOR_URL_NOT_CONFIGURED',
+    };
+  }
   const targetUrl = connectorUrl.endsWith('/sync')
     ? connectorUrl
     : `${connectorUrl.replace(/\/+$/, '')}/sync`;

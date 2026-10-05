@@ -13,7 +13,7 @@ export interface ApiSyncResult {
 }
 
 export class ApiClient {
-  private static baseUrl = '/api';
+  private static baseUrl = `${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')}/api`;
 
   public static async getAccounts(): Promise<any[]> {
     try {
