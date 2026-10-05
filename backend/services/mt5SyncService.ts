@@ -46,7 +46,9 @@ export function aggregateDealsToLogicalTrades(
     posDeals.sort((a, b) => new Date(a.deal_time).getTime() - new Date(b.deal_time).getTime());
 
     const entryDeal = posDeals.find((d) => d.entry_type === 'IN') || posDeals[0];
-    const exitDeals = posDeals.filter((d) => d.entry_type === 'OUT');
+    // MT5 uses INOUT when a netting-account deal closes/reverses an existing
+    // position. Count it as an exit so the realized result is included.
+    const exitDeals = posDeals.filter((d) => d.entry_type === 'OUT' || d.entry_type === 'INOUT');
     const lastExitDeal = exitDeals[exitDeals.length - 1];
 
     const totalVolume = entryDeal.volume;

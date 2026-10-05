@@ -9,7 +9,7 @@ interface OverviewScreenProps {
   onNavigateToJournal: () => void;
 }
 
-const money = (value: number) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (value: number) => `${value < 0 ? '-$' : '$'}${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export const OverviewScreen: React.FC<OverviewScreenProps> = ({
   activeAccount,
@@ -19,9 +19,17 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
   onNavigateToJournal,
 }) => {
   const accountTrades = trades.filter((trade) => trade.accountId === activeAccount.id);
-  const recentTrades = accountTrades.slice(0, 5);
+  const recentTrades = [...accountTrades].sort((a, b) => {
+    const aTime = Date.parse(a.time);
+    const bTime = Date.parse(b.time);
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  }).slice(0, 5);
+  const closedTrades = accountTrades.filter((trade) => trade.outcome !== 'OPEN');
+  const realizedPnl = closedTrades.reduce((total, trade) => total + (Number(trade.pnlValue) || 0), 0);
+  const floatingPnl = Number(activeAccount.floatingPnl) || 0;
+  const totalPnl = realizedPnl + floatingPnl;
   const progress = activeAccount.targetProfit > 0
-    ? Math.max(0, Math.min(100, (activeAccount.netProfit / activeAccount.targetProfit) * 100))
+    ? Math.max(0, Math.min(100, (totalPnl / activeAccount.targetProfit) * 100))
     : 0;
 
   return (
@@ -40,12 +48,13 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {[
           ['Balance', money(activeAccount.currentBalance)],
           ['Equity', money(activeAccount.liveEquity)],
-          ['Net P&L', money(activeAccount.netProfit)],
-          ['Trades synced', String(accountTrades.length)],
+          ['Realized P&L', money(realizedPnl)],
+          ['Floating P&L', money(floatingPnl)],
+          ['Closed trades', String(closedTrades.length)],
         ].map(([label, value]) => (
           <div key={label} className="terminal-glass rounded-xl p-5">
             <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
@@ -65,7 +74,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
           <div className="h-full rounded-full bg-purple-500" style={{ width: `${progress}%` }} />
         </div>
-        <p className="mt-2 text-xs text-slate-400">Profit {money(activeAccount.netProfit)} of {money(activeAccount.targetProfit)}</p>
+        <p className="mt-2 text-xs text-slate-400">Realized + floating P&amp;L {money(totalPnl)} of {money(activeAccount.targetProfit)}</p>
       </section>
 
       <section className="terminal-glass rounded-2xl p-6">
@@ -74,7 +83,10 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
           <button type="button" onClick={onNavigateToJournal} className="text-sm text-purple-300">Open journal</button>
         </div>
         {recentTrades.length === 0 ? (
-          <p className="py-6 text-center text-sm text-slate-400">No trades recorded for this account.</p>
+          <div className="py-6 text-center text-sm text-slate-400">
+            <p>No closed trades found in the synced MT5 history.</p>
+            <p className="mt-1">Use “Sync from MT5” to refresh recent trades and profit/loss.</p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
