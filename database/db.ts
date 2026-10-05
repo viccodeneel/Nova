@@ -19,11 +19,6 @@ if (fs.existsSync(backendEnv)) {
 // DATABASE_URL can be provided from Supabase or standard PostgreSQL
 let databaseUrl = process.env.DATABASE_URL;
 
-// Normalize connection string if missing colon between postgres and password
-if (databaseUrl && databaseUrl.startsWith('postgresql://postgres') && !databaseUrl.startsWith('postgresql://postgres:') && !databaseUrl.startsWith('postgresql://postgres@')) {
-  databaseUrl = databaseUrl.replace('postgresql://postgres', 'postgresql://postgres:');
-}
-
 let pool: pg.Pool | null = null;
 let isConnected = false;
 
