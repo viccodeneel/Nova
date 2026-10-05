@@ -63,13 +63,18 @@ MT5_CONNECTOR_HOST=127.0.0.1
 MT5_CONNECTOR_PORT=5001
 MT5_SIMULATION_MODE=false
 HISTORY_DAYS=30
+SYNC_INTERVAL_SECONDS=10
+HISTORY_SYNC_INTERVAL_SECONDS=300
 
-# Optional path if MT5 is installed in a non-standard path:
-# MT5_PATH="C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+# Recommended: use a separate MT5 terminal installation for NOVA:
+# MT5_PATH="C:\\NOVA-MT5\\terminal64.exe"
+# MT5_PORTABLE=true
 ```
 
 Do not put `MT5_LOGIN` or `MT5_PASSWORD` in `.env`. Enter your MT5 login, server name, and Investor Password in NOVA's **Accounts → Add Account** form. The password is sent to this computer's local connector and is kept in memory only while the connector is running.
 ---
+
+The Python MT5 integration attaches to a terminal installation and logs that terminal into the account entered in NOVA. With an Investor Password, that terminal session is read-only. To keep your regular trading terminal logged in separately, install or copy a second MT5 terminal into its own folder, set `MT5_PATH` to that copy, and set `MT5_PORTABLE=true`. NOVA polls account and position data every 10 seconds, while refreshing historical deals every 5 minutes to reduce terminal load.
 
 ## 5. Starting the Connector Service
 
@@ -195,6 +200,7 @@ nssm start NovaMt5Bridge
 
 | Error | Root Cause | Solution |
 | :--- | :--- | :--- |
+| MT5 terminal switches to read-only or its account changes | The connector is using that same terminal installation | Stop the connector, sign back into your trading terminal with your normal credentials, then configure a separate terminal installation with `MT5_PATH` and `MT5_PORTABLE=true`. |
 | `mt5.initialize() failed: [-10003]` | MT5 Desktop is not running or path is incorrect | Open MetaTrader 5 Desktop terminal before starting the script, or set `MT5_PATH` in `.env`. |
 | `Failed to log into MT5 Account [-2]` | Invalid login, password, or server name | Verify server name matches the exact name in your MT5 login dialog (e.g., `FundingPips-Server`). |
 | `No module named MetaTrader5` | Python 32-bit was installed instead of 64-bit | Reinstall Python with the **64-bit installer (x86-64)** from python.org. |
