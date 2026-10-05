@@ -107,6 +107,36 @@ export class ApiClient {
     }
   }
 
+  public static async syncLocalConnector(): Promise<ApiSyncResult> {
+    try {
+      const requestOptions = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(45000),
+        targetAddressSpace: 'loopback',
+      } as RequestInit & { targetAddressSpace: 'loopback' };
+      const response = await fetch('http://127.0.0.1:5001/refresh', requestOptions);
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await response.json() : {};
+      if (!response.ok || !data.success) {
+        return {
+          success: false,
+          message: data.message || data.error || `Local MT5 sync failed (HTTP ${response.status}).`,
+          error: data.error,
+        };
+      }
+      return data as ApiSyncResult;
+    } catch (err) {
+      return {
+        success: false,
+        message: (err as Error).message === 'Failed to fetch'
+          ? 'Could not reach the local MT5 connector. Keep it running and allow NOVA local-network access in your browser.'
+          : (err as Error).message || 'Could not sync with the local MT5 connector.',
+      };
+    }
+  }
+
   public static async syncMT5(): Promise<ApiSyncResult> {
     try {
       const res = await this.request(`${this.baseUrl}/connector/sync`, {

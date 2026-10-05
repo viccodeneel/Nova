@@ -85,7 +85,7 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(response_bytes)))
         self.send_header("Access-Control-Allow-Origin", allowed_origin or "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-MT5-Bridge-Key, Authorization")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(response_bytes)
@@ -109,7 +109,7 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         """Handle CORS pre-flight requests."""
         parsed_path = urlparse(self.path).path.rstrip("/")
-        if parsed_path == "/connect":
+        if parsed_path in ("/connect", "/refresh"):
             origin = self.headers.get("Origin", "").rstrip("/")
             if origin not in NOVA_FRONTEND_ORIGINS:
                 self.send_response(HTTPStatus.FORBIDDEN)
@@ -233,6 +233,47 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
         global _connector
         parsed_url = urlparse(self.path)
         path = parsed_url.path.rstrip("/")
+
+        if path == "/refresh":
+            origin = self.headers.get("Origin", "").rstrip("/")
+            if origin not in NOVA_FRONTEND_ORIGINS:
+                self._send_json_response(HTTPStatus.FORBIDDEN, {"success": False, "message": "This NOVA site is not allowed to refresh the local MT5 connector."})
+                return
+            try:
+                connector = get_connector()
+                if not connector.is_connected:
+                    raise RuntimeError("The local MT5 connector is not connected. Reconnect your account from NOVA first.")
+
+                import requests
+                snapshot = connector.fetch_full_snapshot()
+                webhook_url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
+                backend_response = requests.post(
+                    webhook_url,
+                    json=snapshot,
+                    headers={"X-MT5-Bridge-Key": MT5_BRIDGE_SECRET},
+                    timeout=30,
+                )
+                try:
+                    result = backend_response.json()
+                except ValueError:
+                    result = {}
+                if backend_response.status_code != 200 or not result.get("success"):
+                    reason = result.get("error") or result.get("message") or backend_response.text[:300]
+                    raise RuntimeError(reason or f"NOVA backend rejected the sync (HTTP {backend_response.status_code}).")
+
+                self._send_json_response(
+                    HTTPStatus.OK,
+                    {"success": True, **result},
+                    allowed_origin=origin,
+                )
+            except Exception as e:
+                logger.warning(f"On-demand MT5 refresh failed: {e}")
+                self._send_json_response(
+                    HTTPStatus.BAD_GATEWAY,
+                    {"success": False, "message": str(e)},
+                    allowed_origin=origin,
+                )
+            return
 
         if path == "/connect":
             origin = self.headers.get("Origin", "").rstrip("/")
@@ -429,7 +470,12 @@ def _watch_and_sync():
                     )
                 else:
                     balance = snapshot.get("account", {}).get("balance", "unknown")
-                    logger.info(f"Scheduled MT5 snapshot accepted by NOVA; MT5 balance={balance}")
+                    deals_received = len(snapshot.get("deals", []))
+                    trades_synced = result.get("trades_created_or_updated", "unknown")
+                    logger.info(
+                        "Scheduled MT5 snapshot accepted by NOVA; "
+                        f"balance={balance}, deals_received={deals_received}, trades_synced={trades_synced}"
+                    )
                     if include_history:
                         last_history_sync = now
             except Exception as e:
