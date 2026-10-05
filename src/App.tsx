@@ -220,6 +220,77 @@ export default function App() {
     });
   }, [authToken]);
 
+  // The local MT5 connector pushes snapshots to the backend every few seconds.
+  // Refresh the dashboard from that backend snapshot so balances and history
+  // do not remain frozen at the values loaded during sign-in.
+  useEffect(() => {
+    if (!authToken) return;
+    let stopped = false;
+    let refreshing = false;
+
+    const refreshDashboard = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const [backendAccounts, backendTrades] = await Promise.all([
+          ApiClient.getAccounts(),
+          ApiClient.getTrades(),
+        ]);
+        if (stopped) return;
+
+        const connectedAccounts = backendAccounts.filter(
+          (account: any) => account.connection_status === 'CONNECTED'
+        );
+        if (connectedAccounts.length > 0) {
+          const mappedAccounts = connectedAccounts.map(mapBackendAccount);
+          setAccounts(mappedAccounts);
+          setActiveAccountId((currentId) =>
+            mappedAccounts.some((account) => account.id === currentId)
+              ? currentId
+              : mappedAccounts[0].id
+          );
+          setLastSyncedTime(connectedAccounts[0].last_synced_at || null);
+        }
+
+        if (backendTrades.length > 0) {
+          setTrades(backendTrades.map((trade: any) => ({
+            id: `MT5-${trade.primary_ticket || trade.id}`,
+            accountId: trade.trading_account_id,
+            time: trade.opened_at ? new Date(trade.opened_at).toLocaleString() : 'Time unavailable',
+            instrument: trade.symbol,
+            side: trade.direction,
+            entry: trade.entry_price?.toString() || '',
+            exit: trade.exit_price?.toString(),
+            lots: trade.volume?.toString() || '',
+            outcome: trade.outcome,
+            rMultiple: `${trade.r_multiple >= 0 ? '+' : ''}${trade.r_multiple}R`,
+            rValue: Number(trade.r_multiple),
+            netPnl: `${trade.net_profit >= 0 ? '+' : '-'}$${Math.abs(trade.net_profit).toFixed(2)}`,
+            pnlValue: Number(trade.net_profit),
+            quality: trade.confluences?.setup_quality || 'Not reviewed',
+            discipline: trade.confluences?.discipline_score != null
+              ? `${trade.confluences.discipline_score}% (${trade.confluences.rules_followed_count || 0}/6)`
+              : 'Not reviewed',
+            disciplineScore: Number(trade.confluences?.discipline_score || 0),
+            session: trade.session_window || 'Unknown',
+            holdDuration: trade.hold_duration || 'Unknown',
+            fees: trade.commission != null ? `${Number(trade.commission).toFixed(2)}` : 'Not reported',
+            notes: trade.confluences?.notes || trade.comment || '',
+            rulesPassed: Number(trade.confluences?.rules_followed_count || 0),
+          })));
+        }
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => void refreshDashboard(), 10_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(intervalId);
+    };
+  }, [authToken]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setUtcSeconds((prev) => (prev + 1) % 86400);
