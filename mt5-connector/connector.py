@@ -222,15 +222,22 @@ class MT5Connector:
         if self.simulation_mode:
             return []
 
-        date_to = datetime.now(tz=timezone.utc)
-        date_from = date_to - timedelta(days=lookback_days)
+        # Pass explicit Unix seconds to avoid datetime timezone interpretation
+        # differences across Windows terminals and broker-server time zones.
+        # The one-day padding at each edge keeps same-day deals in range even
+        # when the broker's displayed clock differs from UTC.
+        utc_now = datetime.now(tz=timezone.utc)
+        date_from = int((utc_now - timedelta(days=lookback_days + 1)).timestamp())
+        date_to = int((utc_now + timedelta(days=1)).timestamp())
 
         deals = mt5.history_deals_get(date_from, date_to)
         if deals is None:
             logger.warning(f"MT5 history query failed: {mt5.last_error()}")
             return []
 
-        logger.info(f"MT5 returned {len(deals)} deal records for the past {lookback_days} days")
+        logger.info(
+            f"MT5 returned {len(deals)} deal records for an approximately {lookback_days}-day history window"
+        )
 
         formatted: List[Dict[str, Any]] = []
         for deal in deals:
