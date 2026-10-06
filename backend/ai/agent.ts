@@ -12,7 +12,7 @@ const instructions = [
   'Use get_account_info for precise questions about the selected verified MT5 account, such as balance, equity, profit, drawdown, open positions, or recorded trades.',
   'Use get_dashboard_summary for questions about the owner name, dashboard profile, multiple accounts, open positions, trade journal, analytics, or Net Worth. Use only the returned facts; never guess.',
   'Use navigate_to_tab only when the user explicitly asks to open or switch to a dashboard section. The tool permits only the existing NOVA pages.',
-  'If a user asks both for dashboard facts and navigation, complete the requested navigation only when the tool explicitly provides an allowed page.',
+  'When the user explicitly requests navigation, call navigate_to_tab. If they also ask for dashboard data, complete navigation and invite them to ask for the data next; do not claim data was checked.',
   'Never invent balances, positions, trades, identity, connection state, prices, net worth, or performance. For stale account data, say so and mention the last sync time when available.',
   'Do not place, modify, or close trades and do not change profile, finance, or journal data. All data tools are read-only; navigation is limited to the explicit user request.',
   'For general questions that do not need dashboard data, answer briefly and distinguish general information from live account analysis.',
@@ -58,7 +58,7 @@ export async function runNovaAssistant(message: string, context: Context, provid
   if (!['get_account_info', 'get_dashboard_summary', 'navigate_to_tab'].includes(toolName)) {
     throw Object.assign(new Error('Requested tool is not allowed.'), { code: 'TOOL_NOT_ALLOWED' });
   }
-  const toolResult = await executeReadOnlyTool(toolName, context, args);
+  if (requestsNavigation.test(message) && toolName !== 'navigate_to_tab') {\n    throw Object.assign(new Error('Requested dashboard navigation was not completed.'), { code: 'DASHBOARD_ACTION_NOT_RETRIEVED' });\n  }\n  const toolResult = await executeReadOnlyTool(toolName, context, args);
   const answer = await provider.respondAfterTool({ message, systemInstruction: instructions, turn, toolName, toolResult });
   if (!answer) throw Object.assign(new Error('AI provider returned no final answer.'), { code: 'AI_EMPTY_RESPONSE' });
   console.info('[NOVA AI] request completed', { provider: process.env.NOVA_AI_PROVIDER || 'gemini', toolCalls: 1, tool: toolName, durationMs: Date.now() - started });
