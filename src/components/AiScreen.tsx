@@ -241,7 +241,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       const result = await ApiClient.askAi(text, activeAccountId, onChunk);
       setMessages((old) => {
         if (speak) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
-        const lastAssistant = old.findLastIndex((message) => message.role === 'nova');
+        const lastAssistant = old.reduce((last, message, index) => message.role === 'nova' ? index : last, -1);
         if (lastAssistant < 0) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
         return old.map((message, index) => index === lastAssistant ? { ...message, text: result.response, account: result.account || undefined } : message);
       });
