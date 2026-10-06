@@ -113,6 +113,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       if (monitorNovaSpeech && voiceConversationRef.current) {
         if (voiceSpeakingRef.current && isNovaSpeechEcho(cleanTranscript)) return;
         if (voiceSpeakingRef.current) {
+          pendingNavigationRef.current = null;
           voiceSpeakingRef.current = false;
           setVoiceSpeaking(false);
           setVoicePulse(0);
