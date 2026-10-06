@@ -64,7 +64,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
           {messages.slice(-4).map((m, i) => <div key={i} className={m.role === 'user' ? 'self-end' : 'self-start'}>
             <p className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'bg-cyan-500/10 text-cyan-100' : 'bg-white/5 text-slate-200'}`}>{m.text}</p>
             {m.account && <div className="mt-2 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-3 text-xs">
-              <div className="mb-2 flex items-center justify-between gap-3"><span className="truncate text-slate-300">{m.account.account_name} · verified snapshot</span><span className={m.account.connection_status === 'CONNECTED' ? 'text-emerald-300' : 'text-amber-300'}>{m.account.connection_status}</span></div>
+              <div className="mb-2 flex items-center justify-between gap-3"><span className="truncate text-slate-300">Selected MT5 account · verified snapshot</span><span className={m.account.connection_status === 'CONNECTED' ? 'text-emerald-300' : 'text-amber-300'}>{m.account.connection_status}</span></div>
               <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-slate-400">
                 <span>Balance</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.balance).toFixed(2)}</span>
                 <span>Equity</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.equity).toFixed(2)}</span>

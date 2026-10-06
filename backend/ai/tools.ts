@@ -2,7 +2,7 @@ import { getAccountById, getAccounts } from '../services/accountService.ts';
 import { getTradesByAccount } from '../services/tradeService.ts';
 
 export interface AccountInfo {
-  account_name: string; account_number: number; broker_name: string; server_name: string; currency: string;
+  currency: string;
   connection_status: string; last_synced_at: string | null; balance: number; equity: number;
   floating_pnl: number; starting_balance: number; net_profit: number; realized_pnl_today: number;
   closed_trades_today: number; open_positions: number; recorded_trades: number;
@@ -30,8 +30,7 @@ export async function getAccountInfo(context: ToolContext): Promise<AccountInfo>
   const trades = await getTradesByAccount(account.id);
   const todaysClosed = trades.filter((trade) => trade.is_closed && trade.closed_at && new Date(trade.closed_at).getTime() >= todayStart.getTime());
   return {
-    account_name: account.account_name, account_number: Number(account.account_number),
-    broker_name: account.broker_name, server_name: account.server_name, currency: account.currency,
+    currency: account.currency,
     connection_status: account.connection_status || 'DISCONNECTED',
     last_synced_at: account.last_synced_at ? new Date(account.last_synced_at).toISOString() : null,
     balance, equity, floating_pnl: Number((equity - balance).toFixed(2)),
