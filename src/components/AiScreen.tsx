@@ -169,7 +169,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
         <motion.div
           layout
           transition={{ layout: { duration: 0.55, ease: [0.22, 1, 0.36, 1] } }}
-          className={`relative z-10 flex min-h-0 min-w-0 flex-1 flex-col ${chatStarted ? 'justify-between' : 'w-full items-center'}`}
+          className={`relative z-10 flex min-h-0 min-w-0 flex-1 flex-col ${chatStarted ? 'justify-between' : 'w-full items-center justify-center'}`}
         >
           {chatStarted ? (
             <>
