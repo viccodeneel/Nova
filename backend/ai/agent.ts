@@ -12,7 +12,7 @@ type AccountInfo = {
 };
 type DashboardSummary = {
   profile: { display_name: string; currency: string; networth_goal: number | null };
-  accounts: Array<{ name: string; broker: string; currency: string; balance: number; equity: number; connection_status: string; last_synced_at: string | null; open_positions: number; recorded_trades: number }>;
+  accounts: Array<{ name: string; broker: string; currency: string; balance: number; equity: number; connection_status: string; last_synced_at: string | null; open_positions: number; recorded_trades: number; daily_drawdown: number; max_drawdown: number }>;
   trading_performance_by_currency: Array<{ currency: string; closed_trades: number; wins: number; losses: number; breakevens: number; net_profit: number; win_rate: number }>;
   recent_trades: Array<{ currency: string; symbol: string; direction: string; outcome: string; net_profit: number; opened_at: string; is_closed: boolean }>;
   net_worth: { currency: string; assets: number; liabilities: number; total: number; goal: number | null };
@@ -59,7 +59,7 @@ const money = (value: number, currency: string): string => {
 function accountAnswer(data: AccountInfo): string {
   const pnl = data.realized_pnl_today >= 0 ? '+' : '';
   const synced = data.last_synced_at ? ` Last synced ${new Date(data.last_synced_at).toLocaleString('en-US', { timeZone: 'UTC' })} UTC.` : '';
-  return `MT5 is ${data.connection_status.toLowerCase()}. Balance: ${money(data.balance, data.currency)}; equity: ${money(data.equity, data.currency)}; floating P&L: ${money(data.floating_pnl, data.currency)}; realized P&L today: ${pnl}${money(data.realized_pnl_today, data.currency)}; open positions: ${data.open_positions}; recorded trades: ${data.recorded_trades}.${synced}`;
+  return `MT5 is ${data.connection_status.toLowerCase()}. Balance: ${money(data.balance, data.currency)}; equity: ${money(data.equity, data.currency)}; floating P&L: ${money(data.floating_pnl, data.currency)}; total P&L from starting balance: ${money(data.net_profit, data.currency)}; realized P&L today: ${pnl}${money(data.realized_pnl_today, data.currency)}; open positions: ${data.open_positions}; recorded trades: ${data.recorded_trades}.${synced}`;
 }
 
 function dashboardAnswer(message: string, data: DashboardSummary): string {
