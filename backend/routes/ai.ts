@@ -22,7 +22,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     const data = await runNovaAssistant(message, { accountId });
     res.json({ success: true, data });
   } catch (error) {
-    const err = error as Error & { code?: string; status?: number | string; statusCode?: number | string };
+    const err = error as Error & { code?: string; status?: number | string; statusCode?: number | string; providerErrorType?: string; providerMessage?: string; providerStage?: string };
     const providerStatus = String(err.status || err.statusCode || err.code || '');
     const diagnostic = providerStatus.toUpperCase();
     const numericStatus = Number(providerStatus);
@@ -52,7 +52,14 @@ router.post('/chat', async (req: Request, res: Response) => {
       AI_PROVIDER_UNAVAILABLE: 'The AI provider is temporarily unavailable. Try again shortly.',
       AI_PROVIDER_REQUEST_FAILED: 'The AI provider request failed. Check Render logs for the NOVA AI error code.',
     };
-    console.warn('[NOVA AI] request failed', { code, errorType: err.name || 'Error', providerStatus: numericStatus >= 100 && numericStatus <= 599 ? numericStatus : undefined });
+    console.warn('[NOVA AI] request failed', {
+      code,
+      errorType: err.name || 'Error',
+      providerStatus: numericStatus >= 100 && numericStatus <= 599 ? numericStatus : undefined,
+      providerErrorType: err.providerErrorType,
+      providerStage: err.providerStage,
+      providerMessage: err.providerMessage,
+    });
     res.status(status).json({ success: false, error: { code, message: messages[code] || 'NOVA could not complete that request.' } });
   }
 });
