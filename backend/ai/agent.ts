@@ -1,4 +1,4 @@
-import { READ_ONLY_TOOLS, executeReadOnlyTool } from './tools.ts';
+import { NOVA_TOOLS, executeReadOnlyTool } from './tools.ts';
 import type { AssistantProvider } from './provider.ts';
 import { GeminiProvider } from './providers/geminiProvider.ts';
 import { AnthropicProvider } from './providers/anthropicProvider.ts';
@@ -38,7 +38,7 @@ function createProvider(): AssistantProvider {
 
 export async function runNovaAssistant(message: string, context: Context, provider: AssistantProvider = createProvider()) {
   const started = Date.now();
-  const turn = await provider.generate({ message, systemInstruction: instructions, tools: [...READ_ONLY_TOOLS] });
+  const turn = await provider.generate({ message, systemInstruction: instructions, tools: [...NOVA_TOOLS] });
   if (!turn.toolCalls.length) {
     if (needsAccountData.test(message) || needsDashboardData.test(message) || requestsNavigation.test(message)) {
       throw Object.assign(new Error('Dashboard or account information/action was not retrieved.'), { code: 'LIVE_DATA_NOT_RETRIEVED' });
