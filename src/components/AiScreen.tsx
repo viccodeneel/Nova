@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, PhoneCall, PhoneOff } from 'lucide-react';
+import { Mic, MicOff } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ApiClient } from '../services/apiClient.ts';
 import { createSpeechRecognition, isSpeechRecognitionSupported } from '../services/speechRecognition.ts';
@@ -38,6 +38,8 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const [listening, setListening] = useState(false);
   const [voiceFeedback, setVoiceFeedback] = useState('');
   const [voiceConversation, setVoiceConversation] = useState(false);
+  const [voiceSpeaking, setVoiceSpeaking] = useState(false);
+  const voiceSpeakingRef = useRef(false);
   const voiceConversationRef = useRef(false);
   const waitingForReplyRef = useRef(false);
   const recognitionRef = useRef<ReturnType<typeof createSpeechRecognition>>(null);
@@ -132,7 +134,10 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   };
 
   const finishVoiceTurn = () => {
+    if (!waitingForReplyRef.current) return;
     waitingForReplyRef.current = false;
+    voiceSpeakingRef.current = false;
+    setVoiceSpeaking(false);
     if (!voiceConversationRef.current) return;
     setVoiceFeedback('Listening for your next message…');
     window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
@@ -143,7 +148,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = navigator.language || 'en-US';
-    utterance.onstart = () => setVoiceFeedback('NOVA is speaking…');
+    utterance.onstart = () => { voiceSpeakingRef.current = true; setVoiceSpeaking(true); setVoiceFeedback('NOVA is speaking…'); };
     utterance.onend = finishVoiceTurn;
     utterance.onerror = finishVoiceTurn;
     window.speechSynthesis.speak(utterance);
@@ -193,6 +198,8 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
 
   const stopVoiceConversation = () => {
     voiceConversationRef.current = false;
+    voiceSpeakingRef.current = false;
+    setVoiceSpeaking(false);
     waitingForReplyRef.current = false;
     setVoiceConversation(false);
     recognitionRef.current?.abort();
@@ -202,20 +209,42 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     setVoiceFeedback('Voice conversation ended.');
   };
 
+  const handleOrbClick = () => {
+    if (!voiceConversationRef.current) {
+      startVoiceConversation();
+      return;
+    }
+    if (voiceSpeakingRef.current) {
+      waitingForReplyRef.current = false;
+      voiceSpeakingRef.current = false;
+      setVoiceSpeaking(false);
+      window.speechSynthesis.cancel();
+      setVoiceFeedback('Interrupted. Listening — go ahead.');
+      if (!recognitionRef.current) toggleListening();
+      return;
+    }
+    stopVoiceConversation();
+  };
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div className={`grid gap-4 sm:gap-6 ${voiceConversation ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_340px]'}`}>
       <motion.section
         layout
         transition={{ layout: { duration: 0.65, ease: [0.22, 1, 0.36, 1] } }}
-        className={`hud-panel relative flex min-h-[620px] overflow-hidden p-5 sm:min-h-[680px] sm:p-8 ${chatStarted ? 'flex-row items-stretch gap-4 sm:gap-6' : 'flex-col items-center justify-center'}`}
+        className={`hud-panel relative flex min-h-[min(78svh,680px)] overflow-hidden p-4 sm:min-h-[680px] sm:p-8 ${voiceConversation ? 'flex-col items-center justify-center' : chatStarted ? 'flex-row items-stretch gap-3 sm:gap-6' : 'flex-col items-center justify-center'}`}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-cyan-400/10 to-transparent nova-scan" />
-        <motion.div
+        <motion.button
+          type="button"
           layout
-          transition={{ layout: { duration: 0.65, ease: [0.22, 1, 0.36, 1] } }}
-          className={`relative z-10 flex shrink-0 flex-col items-center ${chatStarted ? 'w-[68px] pt-2 sm:w-[104px] sm:pt-4' : 'w-full max-w-[420px]'}`}
+          onClick={handleOrbClick}
+          aria-label={voiceConversation ? voiceSpeaking ? 'Interrupt NOVA' : listening ? 'End voice conversation' : 'Return to text chat' : 'Start a voice conversation with NOVA'}
+          aria-pressed={voiceConversation}
+          animate={{ scale: voiceConversation && voiceSpeaking ? [1, 1.1, 0.97, 1.08, 1] : voiceConversation && listening ? [1, 0.985, 1.02, 1] : 1 }}
+          transition={{ layout: { duration: 0.65, ease: [0.22, 1, 0.36, 1] }, scale: { duration: voiceSpeaking ? 0.9 : 2, ease: 'easeInOut', repeat: voiceConversation ? Infinity : 0 } }}
+          className={`relative z-10 flex shrink-0 cursor-pointer flex-col items-center border-0 bg-transparent p-0 outline-none focus-visible:rounded-full focus-visible:ring-2 focus-visible:ring-cyan-300 ${voiceConversation ? 'w-[min(78vw,520px)] max-w-full' : chatStarted ? 'w-[60px] pt-2 sm:w-[104px] sm:pt-4' : 'w-full max-w-[420px]'}`}
         >
-          <svg viewBox="0 0 400 400" className="w-full" role="img" aria-label="NOVA core, offline">
+          <svg viewBox="0 0 400 400" className="w-full" aria-hidden="true">
             <defs>
               <radialGradient id="core" cx="50%" cy="50%" r="50%">
                 <stop offset="0%" stopColor="#e0f2fe" /><stop offset="35%" stopColor="#38bdf8" /><stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
@@ -229,21 +258,35 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
             <circle className="nova-breathe" cx="200" cy="200" r="64" fill="url(#core)" />
             <polygon points="200,168 227,184 227,216 200,232 173,216 173,184" fill="none" stroke="#e0f2fe" strokeOpacity=".8" />
           </svg>
-          {chatStarted
-            ? <p className="mt-2 text-center font-label-tech text-[9px] uppercase tracking-[0.18em] text-cyan-300 sm:text-[10px]">NOVA</p>
-            : <>
+          {voiceConversation
+            ? <p className="mt-3 text-center font-label-tech text-[10px] uppercase tracking-[0.2em] text-cyan-300 sm:text-xs">NOVA · voice</p>
+            : chatStarted
+              ? <p className="mt-2 text-center font-label-tech text-[9px] uppercase tracking-[0.18em] text-cyan-300 sm:text-[10px]">NOVA</p>
+              : <>
                 <p className="mt-4 font-label-tech text-xs uppercase tracking-[0.4em] text-cyan-300">NOVA · standby</p>
                 <h1 className="mt-3 text-center text-2xl font-semibold text-white sm:text-3xl">{greeting}{name ? `, ${name}` : ''}</h1>
                 <p className="mt-2 max-w-sm text-center text-sm text-slate-400">Ask about your account. NOVA checks connected account data before answering account questions.</p>
               </>}
-        </motion.div>
+        </motion.button>
 
         <motion.div
           layout
           transition={{ layout: { duration: 0.55, ease: [0.22, 1, 0.36, 1] } }}
-          className={`relative z-10 flex min-h-0 min-w-0 flex-1 flex-col ${chatStarted ? 'justify-between' : 'w-full items-center justify-center'}`}
+          className={`relative z-10 flex min-h-0 min-w-0 flex-1 flex-col ${voiceConversation ? 'w-full items-center justify-center text-center' : chatStarted ? 'justify-between' : 'w-full items-center justify-center'}`}
         >
-          {chatStarted ? (
+          {voiceConversation ? (
+            <div className="flex max-w-md flex-col items-center px-3 text-center">
+              <p role="status" aria-live="polite" className="font-label-tech text-xs uppercase tracking-[0.2em] text-cyan-200 sm:text-sm">
+                {voiceSpeaking ? 'NOVA is speaking' : busy ? 'NOVA is thinking' : listening ? 'Listening — speak naturally' : 'Voice chat is paused'}
+              </p>
+              <p className="mt-2 text-xs text-slate-500 sm:text-sm">
+                {voiceSpeaking ? 'Tap the orb to interrupt and reply.' : 'Tap the orb again to end voice chat.'}
+              </p>
+              {error && <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p>}
+              {voiceFeedback && <p className="mt-3 text-xs text-cyan-200">{voiceFeedback}</p>}
+              <p className="mt-4 text-[10px] leading-relaxed text-slate-600 sm:text-xs">Your browser may send microphone audio to its speech service. NOVA receives recognized words to answer.</p>
+            </div>
+          ) : chatStarted ? (
             <>
               <div className="mb-3 flex items-center justify-between border-b border-white/5 pb-3">
                 <div>
@@ -281,10 +324,6 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
                   {listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
                   <span className="hidden sm:inline">{listening ? 'Stop' : 'Talk'}</span>
                 </button>
-                <button type="button" onClick={voiceConversation ? stopVoiceConversation : startVoiceConversation} disabled={!voiceConversation && !voiceConversationSupported} aria-label={voiceConversation ? 'End voice conversation' : 'Start voice conversation'} aria-pressed={voiceConversation} className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${voiceConversation ? 'border-rose-400/40 text-rose-300' : 'border-violet-400/25 text-violet-200'}`}>
-                  {voiceConversation ? <PhoneOff size={16} aria-hidden="true" /> : <PhoneCall size={16} aria-hidden="true" />}
-                  <span className="hidden sm:inline">{voiceConversation ? 'End voice chat' : 'Voice chat'}</span>
-                </button>
                 <button type="submit" disabled={busy || listening || !input.trim()} className="shrink-0 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-40">{busy ? '…' : 'Ask'}</button>
               </form>
               {voiceFeedback && <p role="status" aria-live="polite" className="mt-2 text-xs text-cyan-200">{voiceFeedback}</p>}
@@ -299,10 +338,6 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
                   {listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
                   <span>{listening ? 'Stop' : 'Talk'}</span>
                 </button>
-                <button type="button" onClick={voiceConversation ? stopVoiceConversation : startVoiceConversation} disabled={!voiceConversation && !voiceConversationSupported} aria-label={voiceConversation ? 'End voice conversation' : 'Start voice conversation'} aria-pressed={voiceConversation} className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${voiceConversation ? 'border-rose-400/40 text-rose-300' : 'border-violet-400/25 text-violet-200'}`}>
-                  {voiceConversation ? <PhoneOff size={16} aria-hidden="true" /> : <PhoneCall size={16} aria-hidden="true" />}
-                  <span className="hidden sm:inline">{voiceConversation ? 'End voice chat' : 'Voice chat'}</span>
-                </button>
                 <button type="submit" disabled={busy || listening || !input.trim()} className="shrink-0 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-40">{busy ? '…' : 'Ask'}</button>
               </form>
               {voiceFeedback && <p role="status" aria-live="polite" className="mt-2 w-full max-w-lg text-xs text-cyan-200">{voiceFeedback}</p>}
@@ -311,7 +346,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
           )}
         </motion.div>
       </motion.section>
-      <aside className="hud-panel p-5">
+      <aside className={`hud-panel p-5 ${voiceConversation ? 'hidden' : ''}`}>
         <h2 className="font-label-tech text-[11px] uppercase tracking-[0.25em] text-cyan-300">System status</h2>
         <ul className="mt-4 divide-y divide-white/5">
           {rows.map(([k, v, ok]) => (
