@@ -71,7 +71,7 @@ function dashboardAnswer(message: string, data: DashboardSummary): string {
   }
   if (/\b(drawdown)\b/i.test(message)) {
     return data.accounts.length
-      ? data.accounts.map((account) => \`\${account.name}: daily drawdown \${money(account.daily_drawdown, account.currency)}; maximum drawdown \${money(account.max_drawdown, account.currency)}.\`).join(' ')
+      ? data.accounts.map((account) => account.name + ': daily drawdown ' + money(account.daily_drawdown, account.currency) + '; maximum drawdown ' + money(account.max_drawdown, account.currency) + '.')
       : 'There are no verified MT5 accounts with drawdown data yet.';
   }
   if (/\b(account|accounts)\b/i.test(message)) {
