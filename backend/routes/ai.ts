@@ -27,7 +27,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     const diagnostic = providerStatus.toUpperCase();
     const numericStatus = Number(providerStatus);
     let code = err.code || 'AI_REQUEST_FAILED';
-    if (!['AI_NOT_CONFIGURED', 'NO_ACCOUNT', 'ACCOUNT_SELECTION_REQUIRED', 'ACCOUNT_NOT_FOUND', 'LIVE_DATA_NOT_RETRIEVED', 'AI_EMPTY_RESPONSE', 'TOOL_NOT_ALLOWED'].includes(code)) {
+    if (!['AI_NOT_CONFIGURED', 'NO_ACCOUNT', 'ACCOUNT_SELECTION_REQUIRED', 'ACCOUNT_NOT_FOUND', 'LIVE_DATA_NOT_RETRIEVED', 'DASHBOARD_ACTION_NOT_RETRIEVED', 'AI_EMPTY_RESPONSE', 'TOOL_NOT_ALLOWED'].includes(code)) {
       if (/401|UNAUTHENTICATED|API_KEY/.test(diagnostic) || /403|PERMISSION_DENIED/.test(diagnostic)) code = 'AI_PROVIDER_ACCESS';
       else if (/429|RESOURCE_EXHAUSTED|QUOTA/.test(diagnostic)) code = 'AI_PROVIDER_LIMIT';
       else if (/404|NOT_FOUND/.test(diagnostic)) code = 'AI_MODEL_UNAVAILABLE';
@@ -43,6 +43,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       ACCOUNT_SELECTION_REQUIRED: 'Select an account in NOVA before asking about account data.',
       ACCOUNT_NOT_FOUND: 'The selected MT5 account could not be found.',
       LIVE_DATA_NOT_RETRIEVED: 'NOVA could not verify the account data needed to answer. Try again.',
+      DASHBOARD_ACTION_NOT_RETRIEVED: 'NOVA could not open that dashboard section. Try asking again.',
       AI_EMPTY_RESPONSE: 'The AI provider returned an empty answer. Try again.',
       TOOL_NOT_ALLOWED: 'NOVA rejected an unsupported tool request.',
       AI_PROVIDER_ACCESS: 'The configured AI provider rejected its API key or account access. Check the provider key and model access.',
