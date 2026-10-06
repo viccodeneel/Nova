@@ -45,7 +45,7 @@ export class ApiClient {
     let responseText = '';
     let completed: any = null;
     const consumeEvent = (block: string) => {
-      const line = block.split(/\\r?\\n/).find((item) => item.startsWith('data:'));
+      const line = block.split(/\r?\n/).find((item) => item.startsWith('data:'));
       if (!line) return;
       const event = JSON.parse(line.slice(5).trim());
       if (event.type === 'chunk' && typeof event.text === 'string') {
@@ -63,7 +63,7 @@ export class ApiClient {
     while (true) {
       const { value, done } = await reader.read();
       buffer += decoder.decode(value, { stream: !done });
-      const blocks = buffer.split(/\\r?\\n\\r?\\n/);
+      const blocks = buffer.split(/\r?\n\r?\n/);
       buffer = blocks.pop() || '';
       for (const block of blocks) consumeEvent(block);
       if (done) break;
