@@ -60,7 +60,8 @@ export async function runNovaAssistant(message: string, context: Context, provid
   }
   if (requestsNavigation.test(message) && toolName !== 'navigate_to_tab') {
     throw Object.assign(new Error('Requested dashboard navigation was not completed.'), { code: 'DASHBOARD_ACTION_NOT_RETRIEVED' });
-  }\n  const toolResult = await executeReadOnlyTool(toolName, context, args);
+  }
+  const toolResult = await executeReadOnlyTool(toolName, context, args);
   const answer = await provider.respondAfterTool({ message, systemInstruction: instructions, turn, toolName, toolResult });
   if (!answer) throw Object.assign(new Error('AI provider returned no final answer.'), { code: 'AI_EMPTY_RESPONSE' });
   console.info('[NOVA AI] request completed', { provider: process.env.NOVA_AI_PROVIDER || 'gemini', toolCalls: 1, tool: toolName, durationMs: Date.now() - started });
