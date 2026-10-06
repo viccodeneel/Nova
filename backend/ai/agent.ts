@@ -6,7 +6,7 @@ import { AnthropicProvider } from './providers/anthropicProvider.ts';
 type Context = { accountId?: string };
 const needsAccountData = /\b(account|balance|equity|drawdown|position|p&l|profit|loss|trade history|my trades)\b/i;
 const needsDashboardData = /\b(my name|who am i|profile|dashboard|journal|analytics|net worth|net-worth|assets|liabilities|recent trades|trade performance|win rate)\b/i;
-const requestsNavigation = /\b(open|go to|take me to|navigate to|switch to|show me)\b.*\b(dashboard|overview|journal|analytics|accounts|net worth|settings|nova)\b/i;
+const requestsNavigation = /\b(open|go to|take me to|navigate to|switch to|show(?: me)?)\b.*\b(dashboard|overview|journal|analytics|accounts?|trades?|net worth|settings|nova)\b/i;
 const instructions = [
   'You are NOVA, a concise assistant inside a personal trading dashboard.',
   'Use get_account_info for precise questions about the selected verified MT5 account, such as balance, equity, profit, drawdown, open positions, or recorded trades.',
