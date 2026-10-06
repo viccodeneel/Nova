@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff, PhoneCall, PhoneOff } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ApiClient } from '../services/apiClient.ts';
 import { createSpeechRecognition, isSpeechRecognitionSupported } from '../services/speechRecognition.ts';
@@ -37,6 +37,9 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const [error, setError] = useState('');
   const [listening, setListening] = useState(false);
   const [voiceFeedback, setVoiceFeedback] = useState('');
+  const [voiceConversation, setVoiceConversation] = useState(false);
+  const voiceConversationRef = useRef(false);
+  const waitingForReplyRef = useRef(false);
   const recognitionRef = useRef<ReturnType<typeof createSpeechRecognition>>(null);
   const speechHadResultRef = useRef(false);
   const speechHadErrorRef = useRef(false);
@@ -44,13 +47,15 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const chatStarted = messages.length > 0;
   useEffect(() => { conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, busy]);
   const speechSupported = isSpeechRecognitionSupported();
+  const speechOutputSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const voiceConversationSupported = speechSupported && speechOutputSupported;
   useEffect(() => { let live = true; ApiClient.getAiStatus().then((v) => { if (live) setAiReady(v.enabled); }).catch(() => { if (live) setAiReady(false); }); return () => { live = false; }; }, []);
-  useEffect(() => () => { recognitionRef.current?.abort(); recognitionRef.current = null; }, []);
+  useEffect(() => () => { voiceConversationRef.current = false; recognitionRef.current?.abort(); recognitionRef.current = null; if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel(); }, []);
   const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
     ['Reasoning core', aiReady === null ? 'CHECKING' : aiReady ? 'TEXT READY' : 'NOT CONFIGURED', aiReady === true],
-    ['Voice input', !speechSupported ? 'UNSUPPORTED' : listening ? 'LISTENING' : 'READY', speechSupported && (listening ? 'warn' : true)],
+    ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
   const toggleListening = () => {
@@ -88,7 +93,13 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
         const remaining = Math.max(0, 2000 - existing.length - separator.length);
         return [existing, cleanTranscript.slice(0, remaining)].filter(Boolean).join(separator);
       });
-      setVoiceFeedback('Transcript ready. Review it, then press Ask.');
+      if (voiceConversationRef.current) {
+        waitingForReplyRef.current = true;
+        setVoiceFeedback('NOVA is preparing a reply…');
+        void submitMessage(cleanTranscript, true);
+      } else {
+        setVoiceFeedback('Transcript ready. Review it, then press Ask.');
+      }
     };
     recognition.onerror = (event) => {
       speechHadErrorRef.current = true;
@@ -98,7 +109,15 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       setListening(false);
       if (recognitionRef.current === recognition) recognitionRef.current = null;
       if (!speechHadResultRef.current && !speechHadErrorRef.current) {
-        setVoiceFeedback('No speech was detected. Try again when you’re ready.');
+        setVoiceFeedback(voiceConversationRef.current ? 'Listening again…' : 'No speech was detected. Try again when you’re ready.');
+      }
+      if (voiceConversationRef.current && !waitingForReplyRef.current) {
+        if (speechHadErrorRef.current) {
+          voiceConversationRef.current = false;
+          setVoiceConversation(false);
+          return;
+        }
+        window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
       }
     };
     recognitionRef.current = recognition;
@@ -112,10 +131,26 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     }
   };
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const text = input.trim();
-    if (!text || busy || listening) return;
+  const finishVoiceTurn = () => {
+    waitingForReplyRef.current = false;
+    if (!voiceConversationRef.current) return;
+    setVoiceFeedback('Listening for your next message…');
+    window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
+  };
+
+  const speakResponse = (text: string) => {
+    if (!voiceConversationRef.current || !speechOutputSupported) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = navigator.language || 'en-US';
+    utterance.onstart = () => setVoiceFeedback('NOVA is speaking…');
+    utterance.onend = finishVoiceTurn;
+    utterance.onerror = finishVoiceTurn;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const submitMessage = async (text: string, speak: boolean) => {
+    if (!text || busy) { waitingForReplyRef.current = false; return; }
     setMessages((old) => [...old, { role: 'user', text }]);
     setInput('');
     setError('');
@@ -123,11 +158,43 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     try {
       const result = await ApiClient.askAi(text, activeAccountId);
       setMessages((old) => [...old, { role: 'nova', text: result.response, account: result.account || undefined }]);
+      if (speak) speakResponse(result.response);
     } catch (e) {
       setError((e as Error).message);
+      if (speak) speakResponse('Sorry, I could not get a reply just now. Please try again.');
     } finally {
       setBusy(false);
     }
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || busy || listening) return;
+    await submitMessage(text, false);
+  };
+
+  const startVoiceConversation = () => {
+    if (!voiceConversationSupported) {
+      setVoiceFeedback('Voice conversations need speech recognition and speech playback. Try the latest Chrome or Edge.');
+      return;
+    }
+    waitingForReplyRef.current = false;
+    voiceConversationRef.current = true;
+    setVoiceConversation(true);
+    setVoiceFeedback('Voice chat started. Speak naturally; NOVA will answer aloud.');
+    toggleListening();
+  };
+
+  const stopVoiceConversation = () => {
+    voiceConversationRef.current = false;
+    waitingForReplyRef.current = false;
+    setVoiceConversation(false);
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    setListening(false);
+    window.speechSynthesis?.cancel();
+    setVoiceFeedback('Voice conversation ended.');
   };
 
   return (
