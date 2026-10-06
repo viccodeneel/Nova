@@ -3,7 +3,10 @@ import { runNovaAssistant } from '../ai/agent.ts';
 
 const router = Router();
 router.get('/status', (_req: Request, res: Response) => {
-  res.json({ success: true, data: { enabled: Boolean(process.env.GEMINI_API_KEY) } });
+  const provider = (process.env.NOVA_AI_PROVIDER || 'gemini').trim().toLowerCase();
+  const enabled = provider === 'anthropic' ? Boolean(process.env.ANTHROPIC_API_KEY)
+    : provider === 'gemini' && Boolean(process.env.GEMINI_API_KEY);
+  res.json({ success: true, data: { enabled, provider: enabled ? provider : null } });
 });
 
 router.post('/chat', async (req: Request, res: Response) => {
@@ -42,11 +45,11 @@ router.post('/chat', async (req: Request, res: Response) => {
       LIVE_DATA_NOT_RETRIEVED: 'NOVA could not verify the account data needed to answer. Try again.',
       AI_EMPTY_RESPONSE: 'The AI provider returned an empty answer. Try again.',
       TOOL_NOT_ALLOWED: 'NOVA rejected an unsupported tool request.',
-      AI_PROVIDER_ACCESS: 'Gemini rejected the API key or this project’s access. Check the backend key and model access in Google AI Studio.',
-      AI_PROVIDER_LIMIT: 'Gemini’s quota or rate limit was reached. Check the project’s API usage and billing limits.',
-      AI_MODEL_UNAVAILABLE: 'The configured Gemini model is unavailable. Set GEMINI_MODEL to gemini-3.8-flash in Render.',
-      AI_PROVIDER_BAD_REQUEST: 'Gemini rejected the request format. Check the backend deployment and configured model.',
-      AI_PROVIDER_UNAVAILABLE: 'Gemini is temporarily unavailable. Try again shortly.',
+      AI_PROVIDER_ACCESS: 'The configured AI provider rejected its API key or account access. Check the provider key and model access.',
+      AI_PROVIDER_LIMIT: 'The AI provider’s quota or rate limit was reached. Check its API usage and billing limits.',
+      AI_MODEL_UNAVAILABLE: 'The configured AI model is unavailable. Check the selected provider and model setting in Render.',
+      AI_PROVIDER_BAD_REQUEST: 'The AI provider rejected the request. Check the backend deployment and configured model.',
+      AI_PROVIDER_UNAVAILABLE: 'The AI provider is temporarily unavailable. Try again shortly.',
       AI_PROVIDER_REQUEST_FAILED: 'The AI provider request failed. Check Render logs for the NOVA AI error code.',
     };
     console.warn('[NOVA AI] request failed', { code, errorType: err.name || 'Error', providerStatus: numericStatus >= 100 && numericStatus <= 599 ? numericStatus : undefined });
