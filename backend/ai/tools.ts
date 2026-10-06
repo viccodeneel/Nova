@@ -13,7 +13,7 @@ type ToolContext = { accountId?: string };
 const NAVIGATION_PAGES = { overview: 'Dashboard', 'trade-journal': 'Trade Journal', analytics: 'Analytics', accounts: 'Accounts', ai: 'NOVA', finance: 'Net Worth', settings: 'Settings' } as const;
 type DashboardPage = keyof typeof NAVIGATION_PAGES;
 
-export const READ_ONLY_TOOLS = [
+export const NOVA_TOOLS = [
   {
     name: 'get_account_info',
     description: 'Read verified MT5 account facts for balance, equity, profit, drawdown, open positions, and recorded trades. Use this for precise questions about the selected account.',
@@ -146,7 +146,7 @@ export async function executeReadOnlyTool(name: string, context: ToolContext, ar
   if (name === 'get_dashboard_summary') return getDashboardSummary(context);
   if (name === 'navigate_to_tab') {
     const page = args.page;
-    if (typeof page !== 'string' || !(page in NAVIGATION_PAGES)) {
+    if (typeof page !== 'string' || !Object.prototype.hasOwnProperty.call(NAVIGATION_PAGES, page)) {
       throw Object.assign(new Error('Requested dashboard page is not allowed.'), { code: 'TOOL_NOT_ALLOWED' });
     }
     return { page, label: NAVIGATION_PAGES[page as DashboardPage] };
