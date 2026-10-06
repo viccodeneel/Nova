@@ -637,7 +637,7 @@ export default function App() {
         <main className="relative mx-auto w-full max-w-6xl p-5 sm:p-8">
           <div key={activeNav} className="nova-enter">
             {activeNav === 'accounts' ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
-              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} activeAccountId={activeAccount?.id} />
+              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} />
               : activeNav === 'finance' ? <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />
               : activeNav === 'settings' ? <SettingsPanel profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />
               : activeNav === 'analytics' ? <AnalyticsScreen trades={trades} />
@@ -1041,7 +1041,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} activeAccountId={activeAccount?.id} />}
+          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} />}
           {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
           {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
 

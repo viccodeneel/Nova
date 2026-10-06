@@ -16,7 +16,7 @@ const instructions = [
 function createProvider(): AssistantProvider {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw Object.assign(new Error('AI provider is not configured.'), { code: 'AI_NOT_CONFIGURED' });
-  return new GeminiProvider(apiKey, process.env.GEMINI_MODEL || 'gemini-2.5-flash');
+  return new GeminiProvider(apiKey, process.env.GEMINI_MODEL || 'gemini-3.8-flash');
 }
 
 export async function runNovaAssistant(message: string, context: Context, provider: AssistantProvider = createProvider()) {
