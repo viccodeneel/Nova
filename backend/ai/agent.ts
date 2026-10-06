@@ -40,8 +40,11 @@ export async function runNovaAssistant(message: string, context: Context, provid
   const started = Date.now();
   const turn = await provider.generate({ message, systemInstruction: instructions, tools: [...NOVA_TOOLS] });
   if (!turn.toolCalls.length) {
-    if (needsAccountData.test(message) || needsDashboardData.test(message) || requestsNavigation.test(message)) {
-      throw Object.assign(new Error('Dashboard or account information/action was not retrieved.'), { code: 'LIVE_DATA_NOT_RETRIEVED' });
+    if (requestsNavigation.test(message)) {
+      throw Object.assign(new Error('Requested dashboard navigation was not completed.'), { code: 'DASHBOARD_ACTION_NOT_RETRIEVED' });
+    }
+    if (needsAccountData.test(message) || needsDashboardData.test(message)) {
+      throw Object.assign(new Error('Dashboard or account information was not retrieved.'), { code: 'LIVE_DATA_NOT_RETRIEVED' });
     }
     const answer = turn.text?.trim();
     if (!answer) throw Object.assign(new Error('AI provider returned no text.'), { code: 'AI_EMPTY_RESPONSE' });
