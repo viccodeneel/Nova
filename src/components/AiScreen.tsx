@@ -31,7 +31,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     setBusy(true);
     try {
       const result = await ApiClient.askAi(text, activeAccountId);
-      setMessages((old) => [...old, { role: 'nova', text: result.response }]);
+      setMessages((old) => [...old, { role: 'nova', text: result.response, account: result.account as AccountSnapshot | undefined }]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -61,7 +61,19 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
         <h1 className="mt-3 text-center text-2xl font-semibold text-white sm:text-3xl">{greeting}{name ? `, ${name}` : ''}</h1>
         <p className="mt-2 max-w-sm text-center text-sm text-slate-400">Ask about your account. NOVA checks connected account data before answering account questions.</p>
         <div aria-live="polite" className="mt-5 flex max-h-36 w-full max-w-lg flex-col gap-2 overflow-y-auto">
-          {messages.slice(-4).map((m, i) => <p key={i} className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'self-end bg-cyan-500/10 text-cyan-100' : 'self-start bg-white/5 text-slate-200'}`}>{m.text}</p>)}
+          {messages.slice(-4).map((m, i) => <div key={i} className={m.role === 'user' ? 'self-end' : 'self-start'}>
+            <p className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'bg-cyan-500/10 text-cyan-100' : 'bg-white/5 text-slate-200'}`}>{m.text}</p>
+            {m.account && <div className="mt-2 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-3 text-xs">
+              <div className="mb-2 flex items-center justify-between gap-3"><span className="truncate text-slate-300">{m.account.account_name} · verified snapshot</span><span className={m.account.connection_status === 'CONNECTED' ? 'text-emerald-300' : 'text-amber-300'}>{m.account.connection_status}</span></div>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-slate-400">
+                <span>Balance</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.balance).toFixed(2)}</span>
+                <span>Equity</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.equity).toFixed(2)}</span>
+                <span>Realized today (UTC)</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.realized_pnl_today).toFixed(2)}</span>
+                <span>Open positions</span><span className="text-right text-slate-200">{m.account.open_positions}</span>
+              </div>
+              {m.account.last_synced_at && <p className="mt-2 text-right text-[10px] text-slate-600">Synced {new Date(m.account.last_synced_at).toLocaleString()}</p>}
+            </div>}
+          </div>)}
         </div>
         {error && <p role="alert" className="mt-2 w-full max-w-lg text-sm text-rose-300">{error}</p>}
         <form onSubmit={submit} className="mt-4 flex w-full max-w-lg items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
