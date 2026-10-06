@@ -27,6 +27,18 @@ export class ApiClient {
     return response;
   }
 
+  public static async askAi(message: string, accountId?: string): Promise<{ response: string; toolCalls: Array<{ name: string; success: boolean }>; account: Record<string, unknown> | null }> {
+    const res = await this.request(`${this.baseUrl}/ai/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, account_id: accountId }), signal: AbortSignal.timeout(30000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.error?.message || 'NOVA could not answer that request.');
+    return data.data;
+  }
+  public static async getAiStatus(): Promise<{ enabled: boolean }> {
+    const res = await this.request(`${this.baseUrl}/ai/status`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error('Could not read NOVA AI status.');
+    return (await res.json()).data;
+  }
+
   public static async login(password: string): Promise<string> {
     const response = await fetch(`${this.baseUrl}/auth/login`, {
       method: 'POST',
