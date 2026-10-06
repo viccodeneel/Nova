@@ -92,13 +92,14 @@ function isTransientProviderError(error: unknown): boolean {
     || /UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|ETIMEDOUT|ECONNRESET|ECONNREFUSED|fetch failed|network error/i.test(`${err.code || ''} ${err.message || ''}`);
 }
 
-async function withTransientRetry<T>(operation: () => Promise<T>, hasStreamedText: () => boolean): Promise<T> {
+async function withTransientRetry<T>(operation: () => Promise<T>, hasStreamedText: () => boolean, onRetry: () => void): Promise<T> {
   const delays = [350, 1000];
   for (let attempt = 0; ; attempt += 1) {
     try { return await operation(); }
     catch (error) {
       if (attempt >= delays.length || hasStreamedText() || !isTransientProviderError(error)) throw error;
       const delay = delays[attempt] + Math.floor(Math.random() * 200);
+      onRetry();
       const err = error as { status?: number | string; statusCode?: number | string; code?: string };
       console.warn('[NOVA AI] retrying transient provider failure', { attempt: attempt + 1, nextAttempt: attempt + 2, delayMs: delay, providerStatus: err.status || err.statusCode || err.code });
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -170,9 +171,9 @@ export async function runNovaAssistant(
       } : undefined,
     ),
     () => streamedText,
+    () => { retries += 1; },
   ).catch((error) => {
     const err = error as { status?: number | string; statusCode?: number | string; code?: string };
-    retries = 0;
     console.warn('[NOVA AI] provider request failed', { provider: providerName, durationMs: Date.now() - started, firstTokenMs: firstChunkAt === null ? undefined : firstChunkAt - started, providerStatus: err.status || err.statusCode || err.code });
     throw error;
   });
