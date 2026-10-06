@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { ApiClient } from '../services/apiClient.ts';
 import { createSpeechRecognition, isSpeechRecognitionSupported } from '../services/speechRecognition.ts';
 import type { SpeechRecognitionErrorEventLike } from '../services/speechRecognition.ts';
+import type { NavSection } from '../data/terminalData.ts';
 
 export type LinkState = 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'NONE';
 
@@ -28,7 +29,7 @@ const speechErrorMessage = (event: SpeechRecognitionErrorEventLike): string => {
 };
 
 // Every status row below reflects real state. Nothing here pretends the AI core exists yet.
-export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId?: string }> = ({ mt5, name, activeAccountId }) => {
+export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId?: string; onNavigate?: (page: NavSection) => void }> = ({ mt5, name, activeAccountId, onNavigate }) => {
   const h = new Date().getHours();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -51,6 +52,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const speechHadResultRef = useRef(false);
   const speechHadErrorRef = useRef(false);
   const conversationEndRef = useRef<HTMLDivElement>(null);
+  const pendingNavigationRef = useRef<NavSection | null>(null);
   const chatStarted = messages.length > 0;
   useEffect(() => { conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, busy]);
   const speechSupported = isSpeechRecognitionSupported();
@@ -181,6 +183,14 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     setVoicePulse(0);
     if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
     if (!voiceConversationRef.current) return;
+    const pendingPage = pendingNavigationRef.current;
+    if (pendingPage) {
+      pendingNavigationRef.current = null;
+      voiceConversationRef.current = false;
+      setVoiceConversation(false);
+      onNavigate?.(pendingPage);
+      return;
+    }
     setVoiceFeedback('Listening for your next message…');
     if (recognitionRef.current) return;
     window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
@@ -222,7 +232,17 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     try {
       const result = await ApiClient.askAi(text, activeAccountId);
       setMessages((old) => [...old, { role: 'nova', text: result.response, account: result.account || undefined }]);
-      if (speak) speakResponse(result.response);
+      if (result.navigation) {
+        if (speak) {
+          pendingNavigationRef.current = result.navigation.page;
+          speakResponse(result.response);
+        } else {
+          setVoiceFeedback(`Opening ${result.navigation.label}…`);
+          window.setTimeout(() => onNavigate?.(result.navigation.page), 900);
+        }
+      } else if (speak) {
+        speakResponse(result.response);
+      }
     } catch (e) {
       setError((e as Error).message);
       if (speak) speakResponse('Sorry, I could not get a reply just now. Please try again.');
@@ -257,6 +277,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
 
   const stopVoiceConversation = () => {
     voiceConversationRef.current = false;
+    pendingNavigationRef.current = null;
     voiceSpeakingRef.current = false;
     setVoiceSpeaking(false);
     setVoicePulse(0);
@@ -276,6 +297,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       return;
     }
     if (voiceSpeakingRef.current) {
+      pendingNavigationRef.current = null;
       waitingForReplyRef.current = false;
       voiceSpeakingRef.current = false;
       setVoiceSpeaking(false);
