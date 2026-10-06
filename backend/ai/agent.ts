@@ -19,9 +19,9 @@ type DashboardSummary = {
 };
 
 const needsAccountData = /\b(account|balance|equity|drawdown|position|p&l|profit|loss|floating|realized)\b/i;
-const needsDashboardData = /\b(my name|who am i|profile|dashboard|journal|analytics|net worth|net-worth|assets|liabilities|recent trades|trade history|my trades|trade performance|win rate|my week)\b/i;
+const needsDashboardData = /\b(my name|who am i|profile|dashboard|journal|analytics|net worth|net-worth|assets|liabilities|recent trades|trade history|my trades|trade performance|win rate|my week|how many trades|trade count|accounts|drawdown)\b/i;
 const asksForAnalysis = /\b(analy[sz]e|review|compare|summari[sz]e|insight|pattern|mistake|improve|how did i do|how am i doing|my week|my month|performance)\b/i;
-const explicitNavigation = /\b(?:open|go to|take me to|navigate to|switch to|show me)\s+(?:(?:the|my)\s+)?(dashboard|overview|trade journal|journal|analytics|accounts|net worth|settings|nova|ai)\b/i;
+const explicitNavigation = /\b(?:open|go to|take me to|navigate to|switch to|show(?: me)?)\s+(?:(?:the|my)\s+)?(dashboard|overview|trade journal|journal|analytics|accounts|net worth|settings|nova|ai)\b/i;
 const navigationPages: Record<string, { page: NavSection; label: string }> = {
   dashboard: { page: 'overview', label: 'Dashboard' }, overview: { page: 'overview', label: 'Dashboard' },
   'trade journal': { page: 'trade-journal', label: 'Trade Journal' }, journal: { page: 'trade-journal', label: 'Trade Journal' },
@@ -68,6 +68,11 @@ function dashboardAnswer(message: string, data: DashboardSummary): string {
   }
   if (/\b(net worth|net-worth|assets|liabilities)\b/i.test(message)) {
     return `Net Worth: assets ${money(data.net_worth.assets, data.net_worth.currency)}, liabilities ${money(data.net_worth.liabilities, data.net_worth.currency)}, total ${money(data.net_worth.total, data.net_worth.currency)}.`;
+  }
+  if (/\b(drawdown)\b/i.test(message)) {
+    return data.accounts.length
+      ? data.accounts.map((account) => \`\${account.name}: daily drawdown \${money(account.daily_drawdown, account.currency)}; maximum drawdown \${money(account.max_drawdown, account.currency)}.\`).join(' ')
+      : 'There are no verified MT5 accounts with drawdown data yet.';
   }
   if (/\b(account|accounts)\b/i.test(message)) {
     return data.accounts.length
@@ -133,7 +138,7 @@ export async function runNovaAssistant(
     }
   }
 
-  const accountRequest = needsAccountData.test(message) && !/\b(net worth|net-worth)\b/i.test(message);
+  const accountRequest = needsAccountData.test(message) && !/\b(net worth|net-worth|accounts|drawdown)\b/i.test(message);
   const dashboardRequest = needsDashboardData.test(message) || asksForAnalysis.test(message);
   const dashboardData = accountRequest && !dashboardRequest
     ? await executeReadOnlyTool('get_account_info', context, {}) as AccountInfo
