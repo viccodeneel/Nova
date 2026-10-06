@@ -40,13 +40,11 @@ router.post('/chat', async (req: Request, res: Response) => {
       });
       if (!sentText) sendEvent({ type: 'chunk', text: data.response });
       sendEvent({ type: 'done', data });
-      console.info('[NOVA AI] stream completed', { provider: data.navigation ? 'none' : providerName, durationMs: Date.now() - started, receivedText: sentText });
       res.end();
       return;
     }
 
     const data = await runNovaAssistant(message, { accountId });
-    console.info('[NOVA AI] request completed', { provider: data.navigation || data.toolCalls.some((tool) => tool.name === 'read_dashboard') ? 'none' : providerName, durationMs: Date.now() - started });
     res.json({ success: true, data });
   } catch (error) {
     const err = error as Error & { code?: string; status?: number | string; statusCode?: number | string; providerErrorType?: string; providerMessage?: string; providerStage?: string };
