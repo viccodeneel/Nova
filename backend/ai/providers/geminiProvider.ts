@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import type { AssistantProvider, AssistantTool, AssistantTurn } from '../provider.ts';
+import type { AssistantProvider, AssistantTool, AssistantTurn, TextChunkHandler } from '../provider.ts';
 
 export class GeminiProvider implements AssistantProvider {
   private readonly client: GoogleGenAI;
@@ -35,5 +35,31 @@ export class GeminiProvider implements AssistantProvider {
       config: { systemInstruction: input.systemInstruction, temperature: 0.2 },
     });
     return result.text?.trim();
+  }
+
+  async generateText(input: { message: string; systemInstruction: string }, onText?: TextChunkHandler): Promise<string> {
+    if (!onText) {
+      const result = await this.client.models.generateContent({
+        model: this.model,
+        contents: [{ role: 'user', parts: [{ text: input.message }] }],
+        config: { systemInstruction: input.systemInstruction, temperature: 0.2, maxOutputTokens: 600 },
+      });
+      return result.text?.trim() || '';
+    }
+
+    const stream = await this.client.models.generateContentStream({
+      model: this.model,
+      contents: [{ role: 'user', parts: [{ text: input.message }] }],
+      config: { systemInstruction: input.systemInstruction, temperature: 0.2, maxOutputTokens: 600 },
+    });
+    let answer = '';
+    for await (const chunk of stream) {
+      const text = chunk.text || '';
+      if (text) {
+        answer += text;
+        onText(text);
+      }
+    }
+    return answer.trim();
   }
 }

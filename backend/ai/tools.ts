@@ -77,8 +77,10 @@ export async function getDashboardSummary(context: ToolContext): Promise<Record<
     accountId,
     positions: await getAccountPositions(accountId),
   })));
+  const accountCurrencies = new Map(accounts.map((account) => [account.id, account.currency]));
   const positions = positionGroups.flatMap(({ accountId, positions: accountPositions }) => accountPositions.map((position) => ({
     account_name: accounts.find((account) => account.id === accountId)?.account_name || 'Verified MT5 account',
+    currency: accountCurrencies.get(accountId) || 'USD',
     symbol: position.symbol, direction: position.direction, volume: Number(position.volume),
     open_price: Number(position.open_price), current_price: Number(position.current_price),
     current_profit: Number(position.current_profit), opened_at: position.opened_at,
@@ -88,7 +90,6 @@ export async function getDashboardSummary(context: ToolContext): Promise<Record<
     trades: await getTradesByAccount(accountId),
   })));
   const accountNames = new Map(accounts.map((account) => [account.id, account.account_name]));
-  const accountCurrencies = new Map(accounts.map((account) => [account.id, account.currency]));
   const trades = tradeGroups.flatMap(({ accountId, trades: accountTrades }) => accountTrades.map((trade) => ({
     account_name: accountNames.get(accountId) || 'Verified MT5 account',
     currency: accountCurrencies.get(accountId) || 'USD',
