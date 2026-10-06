@@ -5,7 +5,9 @@ export type LinkState = 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'NONE';
 const tone = (ok: boolean | 'warn') => (ok === true ? 'text-emerald-400' : ok === 'warn' ? 'text-amber-400' : 'text-slate-500');
 
 // Every status row below reflects real state. Nothing here pretends the AI core exists yet.
-export const AiScreen: React.FC<{ mt5: LinkState }> = ({ mt5 }) => {
+export const AiScreen: React.FC<{ mt5: LinkState; name?: string }> = ({ mt5, name }) => {
+  const h = new Date().getHours();
+  const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
     ['Reasoning core', 'NOT INSTALLED', false],
@@ -14,7 +16,7 @@ export const AiScreen: React.FC<{ mt5: LinkState }> = ({ mt5 }) => {
   ];
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-      <section className="hud-panel relative flex min-h-[560px] flex-col items-center justify-center overflow-hidden p-8">
+      <section className="hud-panel relative flex min-h-[520px] sm:min-h-[560px] flex-col items-center justify-center overflow-hidden p-5 sm:p-8">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-cyan-400/10 to-transparent nova-scan" />
         <svg viewBox="0 0 400 400" className="w-full max-w-[420px]" role="img" aria-label="NOVA core, offline">
           <defs>
@@ -31,6 +33,7 @@ export const AiScreen: React.FC<{ mt5: LinkState }> = ({ mt5 }) => {
           <polygon points="200,168 227,184 227,216 200,232 173,216 173,184" fill="none" stroke="#e0f2fe" strokeOpacity=".8" />
         </svg>
         <p className="mt-4 font-label-tech text-xs uppercase tracking-[0.4em] text-cyan-300">NOVA · standby</p>
+        <h1 className="mt-3 text-center text-2xl font-semibold text-white sm:text-3xl">{greeting}{name ? `, ${name}` : ''}</h1>
         <p className="mt-2 max-w-sm text-center text-sm text-slate-400">The AI core isn’t installed yet. This is the interface it will live in.</p>
         <div className="mt-8 flex w-full max-w-lg items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 opacity-60">
           <span className="material-symbols-outlined text-slate-500">mic_off</span>

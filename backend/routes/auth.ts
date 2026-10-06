@@ -1,6 +1,8 @@
 import { createHmac, scryptSync, timingSafeEqual } from 'node:crypto';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 
+import { getPasswordHash, verifyHash } from '../services/profileService.ts';
+
 const router = Router();
 const SESSION_SECONDS = 12 * 60 * 60;
 const attemptsByAddress = new Map<string, { count: number; resetAt: number }>();
@@ -37,7 +39,15 @@ function isValidToken(token: string): boolean {
   }
 }
 
-router.post('/login', (req: Request, res: Response) => {
+export async function verifyOwnerPassword(password: string): Promise<boolean> {
+  if (!password || password.length > 1024) return false;
+  const stored = await getPasswordHash();
+  if (stored) return verifyHash(password, stored);
+  const configured = process.env.NOVA_AUTH_PASSWORD;
+  return !!configured && timingSafeEqual(derivePassword(password), derivePassword(configured));
+}
+
+router.post('/login', async (req: Request, res: Response) => {
   const now = Date.now();
   if (attemptsByAddress.size > 10_000) {
     for (const [addressKey, savedAttempt] of attemptsByAddress) {
@@ -53,13 +63,13 @@ router.post('/login', (req: Request, res: Response) => {
 
   const configuredPassword = process.env.NOVA_AUTH_PASSWORD;
   const secret = authSecret();
-  if (!configuredPassword || configuredPassword.length < 12 || secret.length < 32) {
+  const hasStored = !!(await getPasswordHash().catch(() => null));
+  if ((!hasStored && (!configuredPassword || configuredPassword.length < 12)) || secret.length < 32) {
     return res.status(503).json({ success: false, message: 'Sign-in needs a password of at least 12 characters and a generated server secret.' });
   }
 
   const suppliedPassword = typeof req.body?.password === 'string' ? req.body.password : '';
-  const valid = suppliedPassword.length > 0 && suppliedPassword.length <= 1024 &&
-    timingSafeEqual(derivePassword(suppliedPassword), derivePassword(configuredPassword));
+  const valid = await verifyOwnerPassword(suppliedPassword).catch(() => false);
   if (!valid) {
     const current = attempt && attempt.resetAt > now ? attempt : { count: 0, resetAt: now + 15 * 60 * 1000 };
     attemptsByAddress.set(address, { ...current, count: current.count + 1 });

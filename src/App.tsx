@@ -21,6 +21,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ConnectAccountScreen } from './components/ConnectAccountScreen';
 import { AiScreen, type LinkState } from './components/AiScreen';
 import { NetWorthScreen } from './components/NetWorthScreen';
+import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
 import { ApiClient } from './services/apiClient.ts';
 
 const NOVA_LOGO_URL =
@@ -36,6 +37,7 @@ const NAV_ITEMS: Array<{
   hoverColor: string;
   badge?: string;
 }> = [
+  { id: 'ai', label: 'NOVA AI', icon: 'neurology', hoverColor: 'group-hover:text-cyan-300' },
   { id: 'overview', label: 'Overview', icon: 'dashboard', hoverColor: 'group-hover:text-purple-300' },
   {
     id: 'trade-journal',
@@ -55,7 +57,6 @@ const NAV_ITEMS: Array<{
     icon: 'account_balance',
     hoverColor: 'group-hover:text-amber-400',
   },
-  { id: 'ai', label: 'NOVA AI', icon: 'neurology', hoverColor: 'group-hover:text-cyan-300', badge: 'SOON' },
   { id: 'finance', label: 'Net Worth', icon: 'account_balance_wallet', hoverColor: 'group-hover:text-emerald-300' },
   { id: 'settings', label: 'Settings', icon: 'tune', hoverColor: 'group-hover:text-slate-200' },
 ];
@@ -99,7 +100,7 @@ export default function App() {
   const [authToken, setAuthToken] = useState(() =>
     import.meta.env.DEV ? 'local-development' : sessionStorage.getItem('nova_session') || ''
   );
-  const [activeNav, setActiveNav] = useState<NavSection>('overview');
+  const [activeNav, setActiveNav] = useState<NavSection>('ai');
 
   // Load from localStorage or defaults
   const [accounts, setAccounts] = useState<PropAccount[]>([]);
@@ -118,6 +119,14 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncToast, setSyncToast] = useState<{ success: boolean; message: string } | null>(null);
   const [backendDown, setBackendDown] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [profile, setProfile] = useState<Profile>({ display_name: '', avatar: null, currency: 'USD', networth_goal: null });
+  useEffect(() => { setMenuOpen(false); }, [activeNav]);
+  useEffect(() => {
+    if (!authToken) return;
+    ApiClient.getProfile().then(setProfile).catch(() => undefined);
+  }, [authToken]);
+  const handleGoalChange = async (goal: number | null) => setProfile(await ApiClient.updateProfile({ networth_goal: goal }));
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
   // Header Interactive States
@@ -320,6 +329,7 @@ export default function App() {
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0];
 
   const handleSignOut = () => {
+    setActiveNav('ai');
     sessionStorage.removeItem('nova_session');
     setAuthToken('');
     setAccounts([]);
@@ -612,29 +622,29 @@ export default function App() {
   );
 
   if (!activeAccount) {
-    const tabs: Array<[NavSection, string]> = [['overview', 'Dashboard'], ['analytics', 'Analytics'], ['accounts', 'Accounts'], ['ai', 'NOVA AI'], ['finance', 'Net Worth']];
+    const tabs: Array<[NavSection, string]> = [['ai', 'NOVA AI'], ['overview', 'Dashboard'], ['analytics', 'Analytics'], ['accounts', 'Accounts'], ['finance', 'Net Worth'], ['settings', 'Settings']];
     return (
       <div className="min-h-screen bg-[#08090d] text-slate-100">
         <div className="pointer-events-none fixed inset-0 overflow-hidden"><div className="absolute -top-40 left-1/4 h-[550px] w-[750px] rounded-full bg-purple-600/10 blur-[140px]" /><div className="absolute top-1/3 -right-24 h-[600px] w-[600px] rounded-full bg-cyan-500/[0.07] blur-[150px]" /></div>
-        <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-white/10 bg-[#0a0c13]/80 px-5 backdrop-blur-xl sm:px-8">
+        <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#0a0c13]/80 px-4 backdrop-blur-xl sm:px-8">
           <span className="font-bold tracking-[0.3em] text-white">NOVA</span>
-          <nav className="flex items-center gap-1">
+          <nav className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
             {tabs.map(([id, label]) => (
               <button key={id} type="button" onClick={() => { setActiveNav(id); setIsConnectAccountOpen(id === 'accounts'); }} className={`rounded-lg px-3 py-2 text-sm transition-all duration-200 ${activeNav === id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>{label}</button>
             ))}
-            {!import.meta.env.DEV && <button type="button" onClick={handleSignOut} className="ml-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:text-white">Sign out</button>}
           </nav>
         </header>
         <main className="relative mx-auto w-full max-w-6xl p-5 sm:p-8">
           <div key={activeNav} className="nova-enter">
             {activeNav === 'accounts' ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
-              : activeNav === 'ai' ? <AiScreen mt5="NONE" />
-              : activeNav === 'finance' ? <NetWorthScreen />
+              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} />
+              : activeNav === 'finance' ? <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />
+              : activeNav === 'settings' ? <SettingsPanel profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />
               : activeNav === 'analytics' ? <AnalyticsScreen trades={trades} />
               : (
                 <section className="hud-panel p-8 sm:p-12">
                   <p className="font-label-tech text-xs uppercase tracking-[0.3em] text-cyan-300">{backendDown ? 'Backend unreachable' : 'No MT5 account connected'}</p>
-                  <h1 className="mt-3 text-2xl font-bold text-white">{greeting}, Vicco</h1>
+                  <h1 className="mt-3 text-2xl font-bold text-white">{greeting}{profile.display_name ? `, ${profile.display_name}` : ''}</h1>
                   <p className="mt-2 max-w-xl text-sm text-slate-400">Trading data appears here once an MT5 account is connected. Nothing is shown until it comes from a real account.</p>
                   <button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="mt-6 rounded-lg bg-gradient-to-r from-cyan-500 to-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Connect an account</button>
                 </section>
@@ -657,7 +667,8 @@ export default function App() {
       </div>
 
       {/* Sidebar Navigation */}
-      <aside className="fixed left-0 top-0 h-full w-64 bg-[#0a0c13]/90 backdrop-blur-2xl z-50 flex flex-col justify-between border-r border-white/[0.07] shadow-[4px_0_30px_rgba(0,0,0,0.6)]">
+      {menuOpen && <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />}
+      <aside className={`fixed left-0 top-0 h-full w-64 bg-[#0a0c13]/90 backdrop-blur-2xl z-50 flex flex-col justify-between border-r border-white/[0.07] shadow-[4px_0_30px_rgba(0,0,0,0.6)] transition-transform duration-300 ease-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
         <div className="flex flex-col">
           <div className="h-16 px-4 flex items-center justify-between border-b border-white/[0.06] bg-white/[0.01]">
             <div
@@ -770,25 +781,28 @@ export default function App() {
       </aside>
 
       {/* Main Wrapper */}
-      <div className="pl-64 relative z-10">
-        <header className="fixed top-0 left-64 right-0 h-16 bg-[#08090e]/80 backdrop-blur-2xl z-40 px-6 flex items-center justify-between border-b border-white/[0.07] shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-          <div className="flex flex-col justify-center">
+      <div className="lg:pl-64 relative z-10">
+        <header className="fixed top-0 left-0 lg:left-64 right-0 h-16 bg-[#08090e]/80 backdrop-blur-2xl z-40 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.07] shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+          <div className="flex min-w-0 items-center gap-2">
+          <button type="button" aria-label="Open menu" onClick={() => setMenuOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">menu</span></button>
+          <div className="flex min-w-0 flex-col justify-center">
             <div className="flex items-center gap-2.5">
-              <span className="font-headline-sm text-base text-white font-semibold tracking-tight">
-                {greeting}, Vicco
+              <span className="font-headline-sm text-base text-white font-semibold tracking-tight hidden sm:inline truncate">
+                {greeting}{profile.display_name ? `, ${profile.display_name}` : ''}
               </span>
               <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${chipCls} font-label-tech text-[10px] font-semibold tracking-wider`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${dotCls} ${linkState === 'CONNECTED' ? 'animate-pulse' : ''}`}></span>
                 {linkLabel}
               </span>
             </div>
-            <span className="font-body-sm text-[11px] text-slate-400 font-normal mt-0.5 flex items-center gap-1.5">
+            <span className="font-body-sm text-[11px] text-slate-400 font-normal mt-0.5 hidden sm:flex items-center gap-1.5">
               <span>Market Session:</span>
               <span className="text-slate-200 font-medium">{sessionName}</span>
             </span>
           </div>
+          </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <div className="hidden xl:flex items-center gap-2">
               <div className="flex items-center gap-2 bg-white/[0.03] border border-white/[0.06] px-3 py-1.5 rounded-lg shadow-inner">
                 <span className="material-symbols-outlined text-cyan-400 text-sm leading-none">
@@ -890,18 +904,13 @@ export default function App() {
                 className="flex items-center gap-2.5 pl-1.5 pr-2.5 py-1 rounded-xl bg-white/[0.02] border border-white/[0.07] hover:border-white/15 hover:bg-white/[0.05] transition-all cursor-pointer"
               >
                 <div className="relative">
-                  <img
-                    alt="Vicco R."
-                    referrerPolicy="no-referrer"
-                    className="w-8 h-8 rounded-lg object-cover ring-1 ring-purple-400/40"
-                    src={VICCO_AVATAR_URL}
-                  />
+                  <Avatar profile={profile} />
                   <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#08090e]"></span>
                 </div>
                 <div className="hidden md:flex flex-col text-left">
                   <div className="flex items-center gap-1.5">
                     <span className="font-body-md text-xs text-white font-semibold leading-none">
-                      Vicco R.
+                      {profile.display_name || 'NOVA'}
                     </span>
                     <span
                       className="material-symbols-outlined text-cyan-400 text-xs leading-none"
@@ -999,7 +1008,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="w-full pt-20 pb-12 px-6 lg:px-8">
+        <main className="w-full pt-20 pb-28 lg:pb-12 px-4 sm:px-6 lg:px-8">
           <div key={activeNav} className="nova-enter">
           {activeNav === 'overview' && (
             <OverviewScreen
@@ -1032,8 +1041,8 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'ai' && <AiScreen mt5={linkState} />}
-          {activeNav === 'finance' && <NetWorthScreen />}
+          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} />}
+          {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
           {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
 
           {activeNav === 'accounts' && (
@@ -1062,21 +1071,27 @@ export default function App() {
           )}
 
           {activeNav === 'settings' && (
-            <SettingsScreen
-              dlmRules={dlmRules}
-              onToggleRule={handleToggleRule}
-              activeAccount={activeAccount}
-              mt5Config={mt5Config}
-              onOpenConnectModal={() => {
-                setActiveNav('accounts');
-                setIsConnectAccountOpen(true);
-              }}
-              onClearData={handleClearAllData}
+            <SettingsPanel
+              profile={profile}
+              onProfileChange={setProfile}
+              accounts={accounts}
+              onDeleteAccount={handleDeleteAccount}
+              onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}
+              onSignOut={import.meta.env.DEV ? undefined : handleSignOut}
             />
           )}
           </div>
         </main>
       </div>
+
+      <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/10 bg-[#0a0c13]/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
+        {([['ai', 'NOVA', 'neurology'], ['overview', 'Dashboard', 'dashboard'], ['finance', 'Net Worth', 'account_balance_wallet'], ['settings', 'Settings', 'settings']] as const).map(([id, label, icon]) => (
+          <button key={id} type="button" onClick={() => setActiveNav(id)} className={`flex flex-col items-center gap-0.5 py-2.5 text-[10px] transition-colors ${activeNav === id ? 'text-cyan-300' : 'text-slate-500'}`}>
+            <span className="material-symbols-outlined text-[22px]">{icon}</span>{label}
+          </button>
+        ))}
+        <button type="button" onClick={() => setMenuOpen(true)} className="flex flex-col items-center gap-0.5 py-2.5 text-[10px] text-slate-500"><span className="material-symbols-outlined text-[22px]">apps</span>More</button>
+      </nav>
 
       {toast}
 

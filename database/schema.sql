@@ -247,3 +247,24 @@ CREATE TABLE IF NOT EXISTS finance_items (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- Single-owner profile + password override (set from the Settings screen)
+CREATE TABLE IF NOT EXISTS app_profile (
+    id INT PRIMARY KEY CHECK (id = 1),
+    display_name VARCHAR(60) NOT NULL DEFAULT 'Vicco',
+    avatar TEXT,
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+    networth_goal NUMERIC(18,2),
+    password_hash TEXT,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- One row per day, derived from finance_items; powers the net worth trend
+CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+    day DATE PRIMARY KEY,
+    assets NUMERIC(18,2) NOT NULL,
+    liabilities NUMERIC(18,2) NOT NULL,
+    net_worth NUMERIC(18,2) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
