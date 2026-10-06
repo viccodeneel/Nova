@@ -3,6 +3,8 @@ export type NavSection =
   | 'trade-journal'
   | 'analytics'
   | 'accounts'
+  | 'ai'
+  | 'finance'
   | 'settings';
 
 export interface TradeExecution {
@@ -69,6 +71,7 @@ export interface PropAccount {
   peakWater: number;
   status: 'SAFE' | 'CAUTION' | 'FUNDED';
   isRealConnected?: boolean;
+  connectionStatus?: string;
   tradeCount?: number;
 }
 

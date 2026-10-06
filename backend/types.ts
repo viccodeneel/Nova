@@ -10,7 +10,7 @@ export interface MT5AccountSnapshot {
   margin_level?: number;
   currency?: string;
   leverage?: number;
-  connection_status?: 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+  connection_status?: 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'ERROR';
   data_mode?: 'MT5' | 'SIMULATED';
 }
 
@@ -153,7 +153,7 @@ export interface TradingAccountRecord {
   margin: number;
   free_margin: number;
   margin_level: number;
-  connection_status: 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+  connection_status: 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'ERROR';
   mt5_data_verified?: boolean;
   bridge_protocol: string;
   is_active: boolean;

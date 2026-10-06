@@ -126,7 +126,8 @@ export function aggregateDealsToLogicalTrades(
  */
 export async function processMT5SyncPayload(
   accountId: string,
-  payload: MT5SyncPayload
+  payload: MT5SyncPayload,
+  options: { allowCreate?: boolean } = {}
 ): Promise<SyncResult> {
   const syncedAt = new Date().toISOString();
   const { account, positions = [], deals = [] } = payload;
@@ -215,6 +216,17 @@ export async function processMT5SyncPayload(
           );
         }
       } else {
+        if (!options.allowCreate) return {
+          success: false,
+          message: 'This account is not registered in NOVA. Connect it again from the Accounts page.',
+          account_id: accountId,
+          account_number: account.account_number,
+          positions_synced: 0,
+          deals_synced: 0,
+          trades_created_or_updated: 0,
+          synced_at: syncedAt,
+          error: 'ACCOUNT_NOT_REGISTERED',
+        };
         const newAcc = await query<{ id: string }>(
           `INSERT INTO trading_accounts (
             account_name, account_number, broker_name, server_name, starting_balance,
@@ -419,6 +431,18 @@ export async function processMT5SyncPayload(
     }
   } else {
     // In-memory fallback repository when DB is not yet connected
+    const known = (await inMemoryStore.getAllAccounts()).some((a) => a.account_number === account.account_number);
+    if (!known && !options.allowCreate) return {
+        success: false,
+        message: 'This account is not registered in NOVA. Connect it again from the Accounts page.',
+        account_id: accountId,
+        account_number: account.account_number,
+        positions_synced: 0,
+        deals_synced: 0,
+        trades_created_or_updated: 0,
+        synced_at: syncedAt,
+        error: 'ACCOUNT_NOT_REGISTERED',
+      };
     inMemoryStore.updateAccountSync(accountId, account, positions, deals, logicalTrades);
   }
 
