@@ -39,7 +39,12 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const [voiceFeedback, setVoiceFeedback] = useState('');
   const [voiceConversation, setVoiceConversation] = useState(false);
   const [voiceSpeaking, setVoiceSpeaking] = useState(false);
+  const [voicePulse, setVoicePulse] = useState(0);
+  const [voicePulseSequence, setVoicePulseSequence] = useState(0);
   const voiceSpeakingRef = useRef(false);
+  const spokenTextRef = useRef('');
+  const spokenCharIndexRef = useRef(0);
+  const voicePulseTimeoutRef = useRef<number | null>(null);
   const voiceConversationRef = useRef(false);
   const waitingForReplyRef = useRef(false);
   const recognitionRef = useRef<ReturnType<typeof createSpeechRecognition>>(null);
@@ -60,7 +65,19 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
-  const toggleListening = () => {
+  const isNovaSpeechEcho = (transcript: string): boolean => {
+    const normalized = transcript.toLowerCase().replace(/[^a-z0-9']+/g, ' ').trim();
+    if (normalized.length < 5) return false;
+    const start = Math.max(0, spokenCharIndexRef.current - 70);
+    const spokenWindow = spokenTextRef.current.slice(start, spokenCharIndexRef.current + 190).toLowerCase().replace(/[^a-z0-9']+/g, ' ');
+    if (spokenWindow.includes(normalized)) return true;
+    const words = normalized.split(/\s+/).filter((word) => word.length > 2);
+    if (words.length < 3) return false;
+    const matched = words.filter((word) => spokenWindow.includes(word)).length;
+    return matched / words.length >= 0.78;
+  };
+
+  const toggleListening = (monitorNovaSpeech = false) => {
     const activeRecognition = recognitionRef.current;
     if (activeRecognition) {
       activeRecognition.stop();
@@ -77,17 +94,40 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     speechHadErrorRef.current = false;
     setVoiceFeedback('');
     recognition.lang = navigator.language || 'en-US';
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = monitorNovaSpeech;
+    recognition.interimResults = monitorNovaSpeech;
     recognition.maxAlternatives = 1;
     recognition.onresult = (event) => {
       let transcript = '';
+      let hasFinalResult = !monitorNovaSpeech;
       const firstResult = event.resultIndex ?? 0;
       for (let index = firstResult; index < event.results.length; index += 1) {
         transcript += event.results[index]?.[0]?.transcript || '';
+        if (event.results[index]?.isFinal) hasFinalResult = true;
       }
       const cleanTranscript = transcript.trim();
       if (!cleanTranscript) return;
+
+      if (monitorNovaSpeech && voiceConversationRef.current) {
+        if (voiceSpeakingRef.current && isNovaSpeechEcho(cleanTranscript)) return;
+        if (voiceSpeakingRef.current) {
+          voiceSpeakingRef.current = false;
+          setVoiceSpeaking(false);
+          setVoicePulse(0);
+          waitingForReplyRef.current = false;
+          window.speechSynthesis.cancel();
+          setVoiceFeedback('I hear you — go ahead.');
+        }
+        if (!hasFinalResult) return;
+        speechHadResultRef.current = true;
+        waitingForReplyRef.current = true;
+        setVoiceFeedback('NOVA is preparing a reply…');
+        recognition.stop();
+        void submitMessage(cleanTranscript, true);
+        return;
+      }
+
+      if (!hasFinalResult) return;
       speechHadResultRef.current = true;
       setInput((current) => {
         const existing = current.trim();
@@ -119,7 +159,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
           setVoiceConversation(false);
           return;
         }
-        window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
+        window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(voiceSpeakingRef.current); }, 350);
       }
     };
     recognitionRef.current = recognition;
@@ -138,17 +178,36 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     waitingForReplyRef.current = false;
     voiceSpeakingRef.current = false;
     setVoiceSpeaking(false);
+    setVoicePulse(0);
+    if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
     if (!voiceConversationRef.current) return;
     setVoiceFeedback('Listening for your next message…');
+    if (recognitionRef.current) return;
     window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
   };
 
   const speakResponse = (text: string) => {
     if (!voiceConversationRef.current || !speechOutputSupported) return;
     window.speechSynthesis.cancel();
+    spokenTextRef.current = text;
+    spokenCharIndexRef.current = 0;
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = navigator.language || 'en-US';
-    utterance.onstart = () => { voiceSpeakingRef.current = true; setVoiceSpeaking(true); setVoiceFeedback('NOVA is speaking…'); };
+    utterance.onstart = () => {
+      voiceSpeakingRef.current = true;
+      setVoiceSpeaking(true);
+      setVoiceFeedback('NOVA is speaking — speak over me to interrupt.');
+      if (!recognitionRef.current) toggleListening(true);
+    };
+    utterance.onboundary = (event) => {
+      spokenCharIndexRef.current = event.charIndex;
+      const word = text.slice(event.charIndex).match(/^[A-Za-z0-9']+/)?.[0] || '';
+      const pulse = Math.min(0.14, 0.04 + word.length * 0.009);
+      setVoicePulse(pulse + (voicePulseSequence % 2) * 0.008);
+      setVoicePulseSequence((count) => count + 1);
+      if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
+      voicePulseTimeoutRef.current = window.setTimeout(() => setVoicePulse(0), 170);
+    };
     utterance.onend = finishVoiceTurn;
     utterance.onerror = finishVoiceTurn;
     window.speechSynthesis.speak(utterance);
@@ -200,6 +259,8 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     voiceConversationRef.current = false;
     voiceSpeakingRef.current = false;
     setVoiceSpeaking(false);
+    setVoicePulse(0);
+    if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
     waitingForReplyRef.current = false;
     setVoiceConversation(false);
     recognitionRef.current?.abort();
@@ -218,6 +279,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       waitingForReplyRef.current = false;
       voiceSpeakingRef.current = false;
       setVoiceSpeaking(false);
+      setVoicePulse(0);
       window.speechSynthesis.cancel();
       setVoiceFeedback('Interrupted. Listening — go ahead.');
       if (!recognitionRef.current) toggleListening();
@@ -240,8 +302,8 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
           onClick={handleOrbClick}
           aria-label={voiceConversation ? voiceSpeaking ? 'Interrupt NOVA' : listening ? 'End voice conversation' : 'Return to text chat' : 'Start a voice conversation with NOVA'}
           aria-pressed={voiceConversation}
-          animate={{ scale: voiceConversation && voiceSpeaking ? [1, 1.1, 0.97, 1.08, 1] : voiceConversation && listening ? [1, 0.985, 1.02, 1] : 1 }}
-          transition={{ layout: { duration: 0.65, ease: [0.22, 1, 0.36, 1] }, scale: { duration: voiceSpeaking ? 0.9 : 2, ease: 'easeInOut', repeat: voiceConversation ? Infinity : 0 } }}
+          animate={{ scale: voiceConversation && voiceSpeaking ? [1, 1 + voicePulse, 1] : voiceConversation && listening ? [1, 0.99, 1.018, 1] : 1 }}
+          transition={{ layout: { duration: 0.65, ease: [0.22, 1, 0.36, 1] }, scale: { duration: voiceSpeaking ? 0.18 : 2, ease: 'easeOut', repeat: voiceConversation && listening && !voiceSpeaking ? Infinity : 0 } }}
           className={`relative z-10 flex shrink-0 cursor-pointer flex-col items-center border-0 bg-transparent p-0 outline-none focus-visible:rounded-full focus-visible:ring-2 focus-visible:ring-cyan-300 ${voiceConversation ? 'w-[min(78vw,520px)] max-w-full' : chatStarted ? 'w-[60px] pt-2 sm:w-[104px] sm:pt-4' : 'w-full max-w-[420px]'}`}
         >
           <svg viewBox="0 0 400 400" className="w-full" aria-hidden="true">
@@ -280,7 +342,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
                 {voiceSpeaking ? 'NOVA is speaking' : busy ? 'NOVA is thinking' : listening ? 'Listening — speak naturally' : 'Voice chat is paused'}
               </p>
               <p className="mt-2 text-xs text-slate-500 sm:text-sm">
-                {voiceSpeaking ? 'Tap the orb to interrupt and reply.' : 'Tap the orb again to end voice chat.'}
+                {voiceSpeaking ? 'Speak over NOVA or tap the orb to interrupt.' : 'Tap the orb again to end voice chat.'}
               </p>
               {error && <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p>}
               {voiceFeedback && <p className="mt-3 text-xs text-cyan-200">{voiceFeedback}</p>}

@@ -1,4 +1,4 @@
-export type SpeechRecognitionResultLike = ArrayLike<{ transcript?: string }>;
+export type SpeechRecognitionResultLike = ArrayLike<{ transcript?: string; confidence?: number }> & { isFinal?: boolean };
 
 export interface SpeechRecognitionEventLike {
   results: ArrayLike<SpeechRecognitionResultLike>;
