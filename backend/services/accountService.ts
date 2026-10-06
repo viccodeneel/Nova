@@ -5,6 +5,15 @@ import { randomUUID } from 'node:crypto';
 
 const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
+// An account only counts as CONNECTED while the connector keeps pushing fresh data.
+const STALE_AFTER_MS = 45_000;
+export function withLiveStatus<T extends { last_synced_at?: any; connection_status?: any }>(acc: T): T {
+  const last = acc.last_synced_at ? new Date(acc.last_synced_at).getTime() : 0;
+  const age = last ? Date.now() - last : Infinity;
+  const status = !last ? 'DISCONNECTED' : age <= STALE_AFTER_MS ? 'CONNECTED' : 'STALE';
+  return { ...acc, connection_status: status, data_age_seconds: last ? Math.round(age / 1000) : null };
+}
+
 export async function getAccounts(): Promise<TradingAccountRecord[]> {
   if (isDatabaseConnected()) {
     const res = await query<TradingAccountRecord>(
@@ -40,11 +49,11 @@ export async function getAccounts(): Promise<TradingAccountRecord[]> {
        WHERE a.mt5_data_verified IS TRUE
        ORDER BY a.created_at ASC`
     );
-    return res ? res.rows : [];
+    return res ? res.rows.map(withLiveStatus) : [];
   }
 
   const accounts = await inMemoryStore.getAllAccounts();
-  return accounts.filter((account) => account.mt5_data_verified === true);
+  return accounts.filter((account) => account.mt5_data_verified === true).map(withLiveStatus);
 }
 
 export async function getAccountById(id: string): Promise<TradingAccountRecord | null> {
@@ -82,11 +91,11 @@ export async function getAccountById(id: string): Promise<TradingAccountRecord |
        WHERE a.id = $1 AND a.mt5_data_verified IS TRUE`,
       [id]
     );
-    return res && res.rows.length > 0 ? res.rows[0] : null;
+    return res && res.rows.length > 0 ? withLiveStatus(res.rows[0]) : null;
   }
 
   const account = await inMemoryStore.getAccount(id);
-  return account?.mt5_data_verified ? account : null;
+  return account?.mt5_data_verified ? withLiveStatus(account) : null;
 }
 
 export async function createAccount(data: {
@@ -232,14 +241,13 @@ export async function createAccount(data: {
 }
 
 export async function deleteAccount(id: string): Promise<boolean> {
+  let removed = false;
   if (isDatabaseConnected() && isUuid(id)) {
-    try {
-      await query(`DELETE FROM trading_accounts WHERE id = $1`, [id]);
-    } catch (err) {
-      console.warn('[Delete Account DB Error]:', err);
-    }
+    const res = await query(`DELETE FROM trading_accounts WHERE id = $1 RETURNING id`, [id]);
+    removed = !!res && res.rows.length > 0;
   }
-  return inMemoryStore.deleteAccount(id);
+  const inMemory = await inMemoryStore.deleteAccount(id);
+  return removed || inMemory;
 }
 
 export async function getAccountPositions(accountId: string): Promise<MT5PositionSnapshot[]> {

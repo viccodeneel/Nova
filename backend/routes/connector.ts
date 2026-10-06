@@ -72,8 +72,9 @@ router.post('/sync-webhook', async (req: Request, res: Response) => {
       positions,
       deals,
       timestamp: new Date().toISOString(),
-    });
+    }, { allowCreate: req.body.connect === true });
 
+    if (result.error === 'ACCOUNT_NOT_REGISTERED') return res.status(404).json(result);
     res.json(result);
   } catch (err) {
     res.status(500).json({

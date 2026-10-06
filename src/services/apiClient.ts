@@ -39,6 +39,29 @@ export class ApiClient {
     return data.token as string;
   }
 
+  private static async finance(path: string, init: RequestInit = {}): Promise<any> {
+    let res: Response;
+    try {
+      res = await this.request(`${this.baseUrl}/finance${path}`, {
+        ...init, headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+      });
+    } catch { throw new Error('Could not reach the NOVA backend.'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+    return data;
+  }
+  public static async getFinanceItems(): Promise<any[]> { return (await this.finance('')).data; }
+  public static addFinanceItem(item: object) { return this.finance('', { method: 'POST', body: JSON.stringify(item) }); }
+  public static updateFinanceItem(id: string, value: number) { return this.finance(`/${id}`, { method: 'PATCH', body: JSON.stringify({ value }) }); }
+  public static deleteFinanceItem(id: string) { return this.finance(`/${id}`, { method: 'DELETE' }); }
+
+  /** Like getAccounts, but throws when the backend is unreachable so callers never mistake an outage for "no accounts". */
+  public static async getAccountsStrict(): Promise<any[]> {
+    const res = await this.request(`${this.baseUrl}/accounts`, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    return (await res.json()).data || [];
+  }
+
   public static async getAccounts(): Promise<any[]> {
     try {
       const res = await this.request(`${this.baseUrl}/accounts`, { signal: AbortSignal.timeout(4000) });

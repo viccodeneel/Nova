@@ -235,3 +235,15 @@ CREATE INDEX IF NOT EXISTS idx_trades_account_time ON trades(trading_account_id,
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_outcome ON trades(outcome);
 CREATE INDEX IF NOT EXISTS idx_trade_confluences_trade ON trade_confluences(trade_id);
+
+
+-- Net worth tracker (manual entries)
+CREATE TABLE IF NOT EXISTS finance_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kind VARCHAR(10) NOT NULL CHECK (kind IN ('asset','liability')),
+    category VARCHAR(30) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    value NUMERIC(18,2) NOT NULL CHECK (value >= 0),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);

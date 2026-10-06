@@ -302,6 +302,7 @@ class MT5BridgeRequestHandler(BaseHTTPRequestHandler):
                 # Keep account connection responsive. Historical deals are fetched
                 # by the scheduled sync after the account snapshot is established.
                 snapshot = candidate.fetch_full_snapshot(include_history=False)
+                snapshot["connect"] = True  # only an explicit connect may create the account in NOVA
 
                 import requests
                 webhook_url = f"{NOVA_BACKEND_URL.rstrip('/')}/api/connector/sync-webhook"
@@ -442,6 +443,7 @@ def start_server():
 
 def _watch_and_sync():
     """Push account/position snapshots frequently and history less often."""
+    global _connector
     last_history_sync = 0.0
     while True:
         with _connector_lock:
@@ -463,7 +465,13 @@ def _watch_and_sync():
                     result = response.json()
                 except ValueError:
                     result = {}
-                if response.status_code != 200 or not result.get("success"):
+                if result.get("error") == "ACCOUNT_NOT_REGISTERED":
+                    logger.warning("Account was removed in NOVA; closing the local MT5 session.")
+                    with _connector_lock:
+                        if _connector is connector:
+                            _connector = None
+                    connector.shutdown()
+                elif response.status_code != 200 or not result.get("success"):
                     reason = result.get("error") or result.get("message") or response.text[:300]
                     logger.warning(
                         f"Scheduled MT5 snapshot rejected (HTTP {response.status_code}): {reason}"

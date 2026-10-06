@@ -87,6 +87,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const success = await deleteAccount(req.params.id);
+    if (!success) return res.status(404).json({ success: false, error: 'Account not found' });
     res.json({ success, message: 'Account deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: (err as Error).message });

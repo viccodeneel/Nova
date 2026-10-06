@@ -19,6 +19,8 @@ import {
 import { Mt5ImportModal } from './components/Mt5ImportModal';
 import { LoginScreen } from './components/LoginScreen';
 import { ConnectAccountScreen } from './components/ConnectAccountScreen';
+import { AiScreen, type LinkState } from './components/AiScreen';
+import { NetWorthScreen } from './components/NetWorthScreen';
 import { ApiClient } from './services/apiClient.ts';
 
 const NOVA_LOGO_URL =
@@ -53,6 +55,8 @@ const NAV_ITEMS: Array<{
     icon: 'account_balance',
     hoverColor: 'group-hover:text-amber-400',
   },
+  { id: 'ai', label: 'NOVA AI', icon: 'neurology', hoverColor: 'group-hover:text-cyan-300', badge: 'SOON' },
+  { id: 'finance', label: 'Net Worth', icon: 'account_balance_wallet', hoverColor: 'group-hover:text-emerald-300' },
   { id: 'settings', label: 'Settings', icon: 'tune', hoverColor: 'group-hover:text-slate-200' },
 ];
 
@@ -86,6 +90,7 @@ function mapBackendAccount(account: any): PropAccount {
     peakWater: Number(account.prop_firm?.peak_watermark ?? startingBalance),
     status: account.prop_firm?.breach_status || 'SAFE',
     isRealConnected: account.connection_status === 'CONNECTED',
+    connectionStatus: account.connection_status,
     tradeCount: Number(account.trades_count || 0),
   };
 }
@@ -112,10 +117,11 @@ export default function App() {
   const [targetImportAccount, setTargetImportAccount] = useState<PropAccount | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncToast, setSyncToast] = useState<{ success: boolean; message: string } | null>(null);
+  const [backendDown, setBackendDown] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
   // Header Interactive States
-  const [utcSeconds, setUtcSeconds] = useState<number>(13 * 3600 + 42 * 60 + 18);
+  const [utcSeconds, setUtcSeconds] = useState<number>(() => { const d = new Date(); return d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds(); });
   const [audioMuted, setAudioMuted] = useState<boolean>(false);
   const [showAlertsPopover, setShowAlertsPopover] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
@@ -137,7 +143,7 @@ export default function App() {
     if (!authToken) return;
     ApiClient.getAccounts().then((backendAccounts) => {
       if (backendAccounts) {
-        const connectedAccounts = backendAccounts.filter((a: any) => a.connection_status === 'CONNECTED');
+        const connectedAccounts = backendAccounts;
         const mapped: PropAccount[] = connectedAccounts.map((a: any) => ({
           id: a.id,
           name: a.account_name,
@@ -168,6 +174,7 @@ export default function App() {
           peakWater: Number(a.prop_firm?.peak_watermark || a.starting_balance),
           status: (a.prop_firm?.breach_status as any) || 'SAFE',
           isRealConnected: a.connection_status === 'CONNECTED',
+    connectionStatus: a.connection_status,
           tradeCount: a.trades_count || 0,
         }));
         setAccounts(mapped);
@@ -233,23 +240,22 @@ export default function App() {
       refreshing = true;
       try {
         const [backendAccounts, backendTrades] = await Promise.all([
-          ApiClient.getAccounts(),
+          ApiClient.getAccountsStrict(),
           ApiClient.getTrades(),
         ]);
         if (stopped) return;
 
-        const connectedAccounts = backendAccounts.filter(
-          (account: any) => account.connection_status === 'CONNECTED'
-        );
-        if (connectedAccounts.length > 0) {
+        const connectedAccounts = backendAccounts;
+        setBackendDown(false);
+        {
           const mappedAccounts = connectedAccounts.map(mapBackendAccount);
           setAccounts(mappedAccounts);
           setActiveAccountId((currentId) =>
             mappedAccounts.some((account) => account.id === currentId)
               ? currentId
-              : mappedAccounts[0].id
+              : mappedAccounts[0]?.id ?? ''
           );
-          setLastSyncedTime(connectedAccounts[0].last_synced_at || null);
+          setLastSyncedTime(connectedAccounts[0]?.last_synced_at || null);
         }
 
         if (backendTrades.length > 0) {
@@ -279,6 +285,8 @@ export default function App() {
             rulesPassed: Number(trade.confluences?.rules_followed_count || 0),
           })));
         }
+      } catch {
+        setBackendDown(true); // keep last known data, but say so
       } finally {
         refreshing = false;
       }
@@ -321,7 +329,7 @@ export default function App() {
 
   const handleLocalAccountConnected = async () => {
     const backendAccounts = await ApiClient.getAccounts();
-    const connectedAccounts = backendAccounts.filter((account: any) => account.connection_status === 'CONNECTED');
+    const connectedAccounts = backendAccounts;
     const mappedAccounts = connectedAccounts.map(mapBackendAccount);
     if (mappedAccounts.length === 0) {
       throw new Error('MT5 connected, but NOVA has not received the account snapshot yet. Check the connector status and try again.');
@@ -422,7 +430,15 @@ export default function App() {
     }
   };
 
-  const handleDeleteAccount = (accountId: string) => {
+  const handleDeleteAccount = async (accountId: string) => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!window.confirm(`Remove ${target?.name ?? 'this account'} from NOVA? Its synced positions and trades will be deleted.`)) return;
+    const removed = await ApiClient.deleteAccount(accountId);
+    if (!removed) {
+      setSyncToast({ success: false, message: 'Could not delete the account. Nothing was removed.' });
+      setTimeout(() => setSyncToast(null), 5000);
+      return;
+    }
     const remaining = accounts.filter((a) => a.id !== accountId);
     setAccounts(remaining);
     // Remove all trades associated with the deleted account
@@ -492,7 +508,7 @@ export default function App() {
       if (res.success) {
         setLastSyncedTime(res.synced_at || new Date().toISOString());
         const backendAccounts = await ApiClient.getAccounts();
-        const connectedAccounts = backendAccounts.filter((a: any) => a.connection_status === 'CONNECTED');
+        const connectedAccounts = backendAccounts;
         const mappedAccounts: PropAccount[] = connectedAccounts.map((a: any) => ({
           id: a.id,
           name: a.account_name,
@@ -518,6 +534,7 @@ export default function App() {
           peakWater: Number(a.prop_firm?.peak_watermark || 0),
           status: (a.prop_firm?.breach_status as any) || 'SAFE',
           isRealConnected: a.connection_status === 'CONNECTED',
+    connectionStatus: a.connection_status,
           tradeCount: a.trades_count || 0,
         }));
         setAccounts(mappedAccounts);
@@ -580,29 +597,51 @@ export default function App() {
       setTimeout(() => setSyncToast(null), 5000);
     }
   };
+  const status = activeAccount?.connectionStatus;
+  const linkState: LinkState = !activeAccount ? 'NONE' : status === 'CONNECTED' ? 'CONNECTED' : status === 'STALE' ? 'STALE' : 'DISCONNECTED';
+  const linkLabel = backendDown ? 'BACKEND UNREACHABLE' : { CONNECTED: 'MT5 CONNECTED', STALE: 'MT5 DATA STALE', DISCONNECTED: 'MT5 DISCONNECTED', NONE: 'NO MT5 ACCOUNT' }[linkState];
+  const tint = backendDown || linkState === 'STALE' ? 'amber' : linkState === 'CONNECTED' ? 'emerald' : linkState === 'DISCONNECTED' ? 'rose' : 'slate';
+  const chipCls = { amber: 'bg-amber-500/10 border-amber-500/30 text-amber-400', emerald: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400', rose: 'bg-rose-500/10 border-rose-500/30 text-rose-400', slate: 'bg-white/5 border-white/10 text-slate-400' }[tint];
+  const dotCls = { amber: 'bg-amber-400', emerald: 'bg-emerald-400', rose: 'bg-rose-400', slate: 'bg-slate-500' }[tint];
+  const utcHour = Math.floor(utcSeconds / 3600);
+  const sessionName = utcHour >= 13 && utcHour < 16 ? 'London / NY Overlap' : utcHour >= 7 && utcHour < 13 ? 'London Session' : utcHour >= 16 && utcHour < 21 ? 'New York Session' : 'Asian Session';
+  const hourNow = new Date().getHours();
+  const greeting = hourNow < 12 ? 'Good morning' : hourNow < 18 ? 'Good afternoon' : 'Good evening';
+  const toast = syncToast && (
+    <div role="status" className={`fixed bottom-6 right-6 z-[60] nova-enter rounded-xl border px-4 py-3 text-sm backdrop-blur-xl ${syncToast.success ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-rose-500/30 bg-rose-500/10 text-rose-200'}`}>{syncToast.message}</div>
+  );
+
   if (!activeAccount) {
+    const tabs: Array<[NavSection, string]> = [['overview', 'Dashboard'], ['analytics', 'Analytics'], ['accounts', 'Accounts'], ['ai', 'NOVA AI'], ['finance', 'Net Worth']];
     return (
       <div className="min-h-screen bg-[#08090d] text-slate-100">
-        <header className="flex h-16 items-center justify-between border-b border-white/10 bg-[#0a0c13] px-5 sm:px-8">
-          <span className="font-bold tracking-[0.2em] text-white">NOVA</span>
-          <nav className="flex items-center gap-2">
-            <button type="button" onClick={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} className={`rounded-lg px-3 py-2 text-sm ${activeNav === 'overview' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>Dashboard</button>
-            <button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className={`rounded-lg px-3 py-2 text-sm ${activeNav === 'accounts' ? 'bg-purple-600/30 text-white' : 'text-slate-400 hover:text-white'}`}>Accounts</button>
-            <button type="button" onClick={handleSignOut} className="ml-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 hover:text-white">Sign out</button>
+        <div className="pointer-events-none fixed inset-0 overflow-hidden"><div className="absolute -top-40 left-1/4 h-[550px] w-[750px] rounded-full bg-purple-600/10 blur-[140px]" /><div className="absolute top-1/3 -right-24 h-[600px] w-[600px] rounded-full bg-cyan-500/[0.07] blur-[150px]" /></div>
+        <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-white/10 bg-[#0a0c13]/80 px-5 backdrop-blur-xl sm:px-8">
+          <span className="font-bold tracking-[0.3em] text-white">NOVA</span>
+          <nav className="flex items-center gap-1">
+            {tabs.map(([id, label]) => (
+              <button key={id} type="button" onClick={() => { setActiveNav(id); setIsConnectAccountOpen(id === 'accounts'); }} className={`rounded-lg px-3 py-2 text-sm transition-all duration-200 ${activeNav === id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>{label}</button>
+            ))}
+            {!import.meta.env.DEV && <button type="button" onClick={handleSignOut} className="ml-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:text-white">Sign out</button>}
           </nav>
         </header>
-        <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-5 sm:p-8">
-          {activeNav === 'accounts' || isConnectAccountOpen ? (
-            <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
-          ) : (
-            <section className="rounded-2xl border border-white/10 bg-[#11141e] p-8 sm:p-12">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-300">Dashboard</p>
-              <h1 className="mt-3 text-2xl font-bold text-white">Your dashboard is ready</h1>
-              <p className="mt-2 max-w-xl text-sm text-slate-400">Account balances, positions, and trading history will appear here after you connect an MT5 account.</p>
-              <button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="mt-6 rounded-lg bg-purple-600 px-5 py-2.5 text-sm font-semibold text-white">Go to Accounts</button>
-            </section>
-          )}
+        <main className="relative mx-auto w-full max-w-6xl p-5 sm:p-8">
+          <div key={activeNav} className="nova-enter">
+            {activeNav === 'accounts' ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
+              : activeNav === 'ai' ? <AiScreen mt5="NONE" />
+              : activeNav === 'finance' ? <NetWorthScreen />
+              : activeNav === 'analytics' ? <AnalyticsScreen trades={trades} />
+              : (
+                <section className="hud-panel p-8 sm:p-12">
+                  <p className="font-label-tech text-xs uppercase tracking-[0.3em] text-cyan-300">{backendDown ? 'Backend unreachable' : 'No MT5 account connected'}</p>
+                  <h1 className="mt-3 text-2xl font-bold text-white">{greeting}, Vicco</h1>
+                  <p className="mt-2 max-w-xl text-sm text-slate-400">Trading data appears here once an MT5 account is connected. Nothing is shown until it comes from a real account.</p>
+                  <button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="mt-6 rounded-lg bg-gradient-to-r from-cyan-500 to-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Connect an account</button>
+                </section>
+              )}
+          </div>
         </main>
+        {toast}
       </div>
     );
   }
@@ -707,26 +746,19 @@ export default function App() {
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-80"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
+                <span className={`absolute inline-flex h-full w-full rounded-full opacity-80 ${linkState === 'CONNECTED' ? 'animate-ping' : ''} ${dotCls}`}></span>
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${dotCls}`}></span>
               </span>
-              <span className="font-label-tech text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                {activeAccount.isRealConnected ? 'MT5 Connected' : 'MT5 Disconnected'}
+              <span className={`font-label-tech text-[10px] font-bold uppercase tracking-wider ${chipCls.split(' ').pop()}`}>
+                {linkLabel}
               </span>
             </div>
             <span className="font-label-numeric-sm text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-slate-400 font-medium">
               READ ONLY
             </span>
           </div>
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="font-label-numeric-sm text-[11px] text-slate-300 flex items-center gap-1">
-              <span className="text-emerald-400 font-bold">{mt5Config.latencyMs}ms</span>
-              <span className="text-slate-500">•</span>
-              MT5 status
-            </span>
-            <span className="font-label-tech text-[9px] px-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
-              ULTRA-LOW
-            </span>
+          <div className="mb-2 text-[11px] text-slate-400">
+            {lastSyncedTime ? `Last data ${new Date(lastSyncedTime).toLocaleTimeString()}` : 'No data received yet'}
           </div>
           <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
             <span className="font-label-tech text-[10px] text-slate-400">Active Prop</span>
@@ -743,21 +775,16 @@ export default function App() {
           <div className="flex flex-col justify-center">
             <div className="flex items-center gap-2.5">
               <span className="font-headline-sm text-base text-white font-semibold tracking-tight">
-                Good morning, Vicco
+                {greeting}, Vicco
               </span>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-label-tech text-[10px] font-semibold tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.2)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                {activeAccount.isRealConnected ? 'MT5 CONNECTED' : 'MT5 DISCONNECTED'}
+              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${chipCls} font-label-tech text-[10px] font-semibold tracking-wider`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${dotCls} ${linkState === 'CONNECTED' ? 'animate-pulse' : ''}`}></span>
+                {linkLabel}
               </span>
             </div>
             <span className="font-body-sm text-[11px] text-slate-400 font-normal mt-0.5 flex items-center gap-1.5">
               <span>Market Session:</span>
-              <span className="text-slate-200 font-medium">London / NY Overlap</span>
-              <span className="text-slate-600">•</span>
-              <span className="text-rose-400 font-medium flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
-                Live market conditions unavailable
-              </span>
+              <span className="text-slate-200 font-medium">{sessionName}</span>
             </span>
           </div>
 
@@ -937,7 +964,7 @@ export default function App() {
                             <span className="font-label-numeric-sm text-xs text-emerald-400 font-bold tabular-nums">
                               ${acc.currentBalance.toLocaleString('en-US')}
                             </span>
-                            {accounts.length > 1 && (
+                            {(
                               <button
                                 type="button"
                                 title="Delete account"
@@ -973,6 +1000,7 @@ export default function App() {
         </header>
 
         <main className="w-full pt-20 pb-12 px-6 lg:px-8">
+          <div key={activeNav} className="nova-enter">
           {activeNav === 'overview' && (
             <OverviewScreen
               activeAccount={activeAccount}
@@ -1004,6 +1032,8 @@ export default function App() {
             />
           )}
 
+          {activeNav === 'ai' && <AiScreen mt5={linkState} />}
+          {activeNav === 'finance' && <NetWorthScreen />}
           {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
 
           {activeNav === 'accounts' && (
@@ -1044,8 +1074,11 @@ export default function App() {
               onClearData={handleClearAllData}
             />
           )}
+          </div>
         </main>
       </div>
+
+      {toast}
 
       {/* MT5 Statement File / Past Deals Importer */}
       <Mt5ImportModal
