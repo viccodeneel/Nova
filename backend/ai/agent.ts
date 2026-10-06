@@ -1,6 +1,7 @@
 import { READ_ONLY_TOOLS, executeReadOnlyTool } from './tools.ts';
 import type { AssistantProvider } from './provider.ts';
 import { GeminiProvider } from './providers/geminiProvider.ts';
+import { AnthropicProvider } from './providers/anthropicProvider.ts';
 
 type Context = { accountId?: string };
 const needsAccountData = /\b(account|balance|equity|drawdown|position|p&l|profit|loss|trade history|my trades)\b/i;
@@ -14,9 +15,21 @@ const instructions = [
 ].join(' ');
 
 function createProvider(): AssistantProvider {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw Object.assign(new Error('AI provider is not configured.'), { code: 'AI_NOT_CONFIGURED' });
-  return new GeminiProvider(apiKey, process.env.GEMINI_MODEL || 'gemini-3.8-flash');
+  const selectedProvider = (process.env.NOVA_AI_PROVIDER || 'gemini').trim().toLowerCase();
+
+  if (selectedProvider === 'anthropic') {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw Object.assign(new Error('Anthropic is not configured.'), { code: 'AI_NOT_CONFIGURED' });
+    return new AnthropicProvider(apiKey, process.env.CLAUDE_MODEL || 'claude-sonnet-4-6');
+  }
+
+  if (selectedProvider === 'gemini') {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw Object.assign(new Error('Gemini is not configured.'), { code: 'AI_NOT_CONFIGURED' });
+    return new GeminiProvider(apiKey, process.env.GEMINI_MODEL || 'gemini-3.8-flash');
+  }
+
+  throw Object.assign(new Error('Unsupported AI provider.'), { code: 'AI_NOT_CONFIGURED' });
 }
 
 export async function runNovaAssistant(message: string, context: Context, provider: AssistantProvider = createProvider()) {
@@ -26,7 +39,7 @@ export async function runNovaAssistant(message: string, context: Context, provid
     if (needsAccountData.test(message)) throw Object.assign(new Error('Live account information was not retrieved.'), { code: 'LIVE_DATA_NOT_RETRIEVED' });
     const answer = turn.text?.trim();
     if (!answer) throw Object.assign(new Error('AI provider returned no text.'), { code: 'AI_EMPTY_RESPONSE' });
-    console.info('[NOVA AI] request completed', { toolCalls: 0, durationMs: Date.now() - started });
+    console.info('[NOVA AI] request completed', { provider: process.env.NOVA_AI_PROVIDER || 'gemini', toolCalls: 0, durationMs: Date.now() - started });
     return { response: answer, toolCalls: [], account: null };
   }
   if (turn.toolCalls.length !== 1 || turn.toolCalls[0].name !== 'get_account_info') {
@@ -36,6 +49,6 @@ export async function runNovaAssistant(message: string, context: Context, provid
   const account = await executeReadOnlyTool(toolName, context) as Record<string, unknown>;
   const answer = await provider.respondAfterTool({ message, systemInstruction: instructions, turn, toolName, toolResult: account });
   if (!answer) throw Object.assign(new Error('AI provider returned no final answer.'), { code: 'AI_EMPTY_RESPONSE' });
-  console.info('[NOVA AI] request completed', { toolCalls: 1, tool: toolName, durationMs: Date.now() - started });
+  console.info('[NOVA AI] request completed', { provider: process.env.NOVA_AI_PROVIDER || 'gemini', toolCalls: 1, tool: toolName, durationMs: Date.now() - started });
   return { response: answer, toolCalls: [{ name: toolName, success: true }], account };
 }
