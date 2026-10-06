@@ -232,7 +232,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     setBusy(true);
     const onChunk = speak ? undefined : (chunk: string) => {
       setMessages((old) => {
-        const lastAssistant = old.findLastIndex((message) => message.role === 'nova');
+        const lastAssistant = old.reduce((last, message, index) => message.role === 'nova' ? index : last, -1);
         if (lastAssistant < 0) return [...old, { role: 'nova', text: chunk }];
         return old.map((message, index) => index === lastAssistant ? { ...message, text: message.text + chunk } : message);
       });
