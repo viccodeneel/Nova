@@ -22,6 +22,7 @@ import connectorRouter from './backend/routes/connector.ts';
 import profileRouter from './backend/routes/profile.ts';
 import financeRouter from './backend/routes/finance.ts';
 import authRouter, { requireAuth } from './backend/routes/auth.ts';
+import aiRouter from './backend/routes/ai.ts';
 
 async function startServer() {
   const app = express();
@@ -68,6 +69,7 @@ async function startServer() {
 
   // API Routes
   app.use('/api/auth', authRouter);
+  app.use('/api/ai', requireAuth, aiRouter);
   app.use('/api/accounts', requireAuth, accountsRouter);
   app.use('/api/trades', requireAuth, tradesRouter);
   app.use('/api/finance', requireAuth, financeRouter);
