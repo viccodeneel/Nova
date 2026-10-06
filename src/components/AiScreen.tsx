@@ -230,6 +230,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
             </>
           )}
         </motion.div>
+      </motion.section>
       <aside className="hud-panel p-5">
         <h2 className="font-label-tech text-[11px] uppercase tracking-[0.25em] text-cyan-300">System status</h2>
         <ul className="mt-4 divide-y divide-white/5">
