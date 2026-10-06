@@ -1,30 +1,112 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Mic, MicOff } from 'lucide-react';
 import { ApiClient } from '../services/apiClient.ts';
+import { createSpeechRecognition, isSpeechRecognitionSupported } from '../services/speechRecognition.ts';
+import type { SpeechRecognitionErrorEventLike } from '../services/speechRecognition.ts';
 
 export type LinkState = 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'NONE';
 
 const tone = (ok: boolean | 'warn') => (ok === true ? 'text-emerald-400' : ok === 'warn' ? 'text-amber-400' : 'text-slate-500');
+type AccountSnapshot = NonNullable<Awaited<ReturnType<typeof ApiClient.askAi>>['account']>;
+type ChatMessage = { role: 'user' | 'nova'; text: string; account?: AccountSnapshot };
+
+const speechErrorMessage = (event: SpeechRecognitionErrorEventLike): string => {
+  switch (event.error) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Microphone access was blocked. Allow microphone access for NOVA in your browser settings.';
+    case 'audio-capture':
+      return 'No microphone was found. Connect or enable a microphone and try again.';
+    case 'no-speech':
+      return 'No speech was detected. Try speaking a little closer to the microphone.';
+    case 'network':
+      return 'The browser speech service could not be reached. Check your connection and try again.';
+    default:
+      return 'Voice input stopped unexpectedly. Please try again.';
+  }
+};
 
 // Every status row below reflects real state. Nothing here pretends the AI core exists yet.
 export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId?: string }> = ({ mt5, name, activeAccountId }) => {
   const h = new Date().getHours();
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'nova'; text: string }>>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [aiReady, setAiReady] = useState<boolean | null>(null);
   const [error, setError] = useState('');
+  const [listening, setListening] = useState(false);
+  const [voiceFeedback, setVoiceFeedback] = useState('');
+  const recognitionRef = useRef<ReturnType<typeof createSpeechRecognition>>(null);
+  const speechHadResultRef = useRef(false);
+  const speechHadErrorRef = useRef(false);
+  const speechSupported = isSpeechRecognitionSupported();
   useEffect(() => { let live = true; ApiClient.getAiStatus().then((v) => { if (live) setAiReady(v.enabled); }).catch(() => { if (live) setAiReady(false); }); return () => { live = false; }; }, []);
+  useEffect(() => () => { recognitionRef.current?.abort(); recognitionRef.current = null; }, []);
   const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
     ['Reasoning core', aiReady === null ? 'CHECKING' : aiReady ? 'TEXT READY' : 'NOT CONFIGURED', aiReady === true],
-    ['Voice interface', 'NOT INSTALLED', false],
+    ['Voice input', !speechSupported ? 'UNSUPPORTED' : listening ? 'LISTENING' : 'READY', speechSupported && (listening ? 'warn' : true)],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
+  const toggleListening = () => {
+    const activeRecognition = recognitionRef.current;
+    if (activeRecognition) {
+      activeRecognition.stop();
+      return;
+    }
+
+    const recognition = createSpeechRecognition();
+    if (!recognition) {
+      setVoiceFeedback('Voice input is not supported in this browser. Try a recent version of Chrome or Edge.');
+      return;
+    }
+
+    speechHadResultRef.current = false;
+    speechHadErrorRef.current = false;
+    setVoiceFeedback('');
+    recognition.lang = navigator.language || 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      let transcript = '';
+      const firstResult = event.resultIndex ?? 0;
+      for (let index = firstResult; index < event.results.length; index += 1) {
+        transcript += event.results[index]?.[0]?.transcript || '';
+      }
+      const cleanTranscript = transcript.trim();
+      if (!cleanTranscript) return;
+      speechHadResultRef.current = true;
+      setInput((current) => [current.trim(), cleanTranscript].filter(Boolean).join(' '));
+      setVoiceFeedback('Transcript ready. Review it, then press Ask.');
+    };
+    recognition.onerror = (event) => {
+      speechHadErrorRef.current = true;
+      setVoiceFeedback(speechErrorMessage(event));
+    };
+    recognition.onend = () => {
+      setListening(false);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+      if (!speechHadResultRef.current && !speechHadErrorRef.current) {
+        setVoiceFeedback('No speech was detected. Try again when you’re ready.');
+      }
+    };
+    recognitionRef.current = recognition;
+    setListening(true);
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setListening(false);
+      setVoiceFeedback('Voice input could not start. Check microphone access and try again.');
+    }
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || busy || listening) return;
     setMessages((old) => [...old, { role: 'user', text }]);
     setInput('');
     setError('');
@@ -77,10 +159,23 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
         </div>
         {error && <p role="alert" className="mt-2 w-full max-w-lg text-sm text-rose-300">{error}</p>}
         <form onSubmit={submit} className="mt-4 flex w-full max-w-lg items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
-          <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} maxLength={2000} aria-label="Ask NOVA" placeholder="Ask NOVA about your account…" className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" />
-          <button type="submit" disabled={busy || !input.trim()} className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-40">{busy ? '…' : 'Ask'}</button>
+          <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} maxLength={2000} aria-label="Ask NOVA" placeholder="Ask NOVA about your account…" className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500" />
+          <button
+            type="button"
+            onClick={toggleListening}
+            disabled={busy || (!speechSupported && !listening)}
+            aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+            aria-pressed={listening}
+            title={listening ? 'Stop listening' : 'Speak to NOVA'}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${listening ? 'border-rose-400/40 text-rose-300' : 'border-cyan-400/20 text-cyan-200'}`}
+          >
+            {listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
+            <span>{listening ? 'Stop' : 'Talk'}</span>
+          </button>
+          <button type="submit" disabled={busy || listening || !input.trim()} className="shrink-0 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-40">{busy ? '…' : 'Ask'}</button>
         </form>
-        <p className="mt-2 text-[11px] text-slate-600">Text assistant only. Voice input is a later milestone.</p>
+        {voiceFeedback && <p role="status" aria-live="polite" className="mt-2 w-full max-w-lg text-xs text-cyan-200">{voiceFeedback}</p>}
+        <p className="mt-2 max-w-lg text-center text-[11px] text-slate-500">Your browser may send audio to its speech service for transcription. NOVA receives the transcript only after you press Ask.</p>
       </section>
       <aside className="hud-panel p-5">
         <h2 className="font-label-tech text-[11px] uppercase tracking-[0.25em] text-cyan-300">System status</h2>
