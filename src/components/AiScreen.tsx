@@ -78,7 +78,12 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       const cleanTranscript = transcript.trim();
       if (!cleanTranscript) return;
       speechHadResultRef.current = true;
-      setInput((current) => [current.trim(), cleanTranscript].filter(Boolean).join(' '));
+      setInput((current) => {
+        const existing = current.trim();
+        const separator = existing ? ' ' : '';
+        const remaining = Math.max(0, 2000 - existing.length - separator.length);
+        return [existing, cleanTranscript.slice(0, remaining)].filter(Boolean).join(separator);
+      });
       setVoiceFeedback('Transcript ready. Review it, then press Ask.');
     };
     recognition.onerror = (event) => {
@@ -113,7 +118,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     setBusy(true);
     try {
       const result = await ApiClient.askAi(text, activeAccountId);
-      setMessages((old) => [...old, { role: 'nova', text: result.response, account: result.account as AccountSnapshot | undefined }]);
+      setMessages((old) => [...old, { role: 'nova', text: result.response, account: result.account || undefined }]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
