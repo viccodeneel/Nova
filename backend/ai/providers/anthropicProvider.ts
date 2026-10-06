@@ -18,7 +18,7 @@ export class AnthropicProvider implements AssistantProvider {
     this.model = model;
   }
 
-  private async createMessage(body: Record<string, unknown>): Promise<AnthropicMessage> {
+  private async createMessage(body: Record<string, unknown>, stage: 'initial' | 'tool_followup'): Promise<AnthropicMessage> {
     const response = await fetch(this.endpoint, {
       method: 'POST',
       headers: {
@@ -30,8 +30,16 @@ export class AnthropicProvider implements AssistantProvider {
     });
 
     if (!response.ok) {
-      // Keep the diagnostic safe: never include request headers or API keys in errors/logs.
-      throw Object.assign(new Error('Anthropic request failed.'), { status: response.status });
+      const payload = await response.json().catch(() => null) as { error?: { type?: string; message?: string } } | null;
+      const providerMessage = typeof payload?.error?.message === 'string'
+        ? payload.error.message.replaceAll(this.apiKey, '[REDACTED]').slice(0, 300)
+        : undefined;
+      throw Object.assign(new Error('Anthropic request failed.'), {
+        status: response.status,
+        providerErrorType: payload?.error?.type,
+        providerMessage,
+        providerStage: stage,
+      });
     }
 
     return await response.json() as AnthropicMessage;
@@ -48,7 +56,7 @@ export class AnthropicProvider implements AssistantProvider {
         description: tool.description,
         input_schema: tool.parametersJsonSchema,
       })),
-    });
+    }, 'initial');
 
     const toolCalls = result.content
       .filter((block): block is Extract<AnthropicContentBlock, { type: 'tool_use' }> => block.type === 'tool_use')
@@ -90,7 +98,7 @@ export class AnthropicProvider implements AssistantProvider {
           }],
         },
       ],
-    });
+    }, 'tool_followup');
 
     return result.content
       .filter((block): block is Extract<AnthropicContentBlock, { type: 'text' }> => block.type === 'text')
