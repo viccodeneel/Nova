@@ -179,6 +179,11 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       setVoiceFeedback('Voice conversations need speech recognition and speech playback. Try the latest Chrome or Edge.');
       return;
     }
+    if (recognitionRef.current) {
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
+      setListening(false);
+    }
     waitingForReplyRef.current = false;
     voiceConversationRef.current = true;
     setVoiceConversation(true);
