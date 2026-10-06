@@ -134,7 +134,10 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   };
 
   const finishVoiceTurn = () => {
+    if (!waitingForReplyRef.current) return;
     waitingForReplyRef.current = false;
+    voiceSpeakingRef.current = false;
+    setVoiceSpeaking(false);
     if (!voiceConversationRef.current) return;
     setVoiceFeedback('Listening for your next message…');
     window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
