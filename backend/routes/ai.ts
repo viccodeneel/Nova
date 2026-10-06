@@ -22,13 +22,14 @@ router.post('/chat', async (req: Request, res: Response) => {
     const err = error as Error & { code?: string; status?: number | string; statusCode?: number | string };
     const providerStatus = String(err.status || err.statusCode || err.code || '');
     const diagnostic = providerStatus.toUpperCase();
+    const numericStatus = Number(providerStatus);
     let code = err.code || 'AI_REQUEST_FAILED';
     if (!['AI_NOT_CONFIGURED', 'NO_ACCOUNT', 'ACCOUNT_SELECTION_REQUIRED', 'ACCOUNT_NOT_FOUND', 'LIVE_DATA_NOT_RETRIEVED', 'AI_EMPTY_RESPONSE', 'TOOL_NOT_ALLOWED'].includes(code)) {
       if (/401|UNAUTHENTICATED|API_KEY/.test(diagnostic) || /403|PERMISSION_DENIED/.test(diagnostic)) code = 'AI_PROVIDER_ACCESS';
       else if (/429|RESOURCE_EXHAUSTED|QUOTA/.test(diagnostic)) code = 'AI_PROVIDER_LIMIT';
       else if (/404|NOT_FOUND/.test(diagnostic)) code = 'AI_MODEL_UNAVAILABLE';
       else if (/400|INVALID_ARGUMENT/.test(diagnostic)) code = 'AI_PROVIDER_BAD_REQUEST';
-      else if (/5\\d\\d|UNAVAILABLE|DEADLINE_EXCEEDED/.test(diagnostic)) code = 'AI_PROVIDER_UNAVAILABLE';
+      else if ((numericStatus >= 500 && numericStatus <= 599) || /UNAVAILABLE|DEADLINE_EXCEEDED/.test(diagnostic)) code = 'AI_PROVIDER_UNAVAILABLE';
       else code = 'AI_PROVIDER_REQUEST_FAILED';
     }
     const status = code === 'AI_NOT_CONFIGURED' || code === 'AI_PROVIDER_LIMIT' || code === 'AI_PROVIDER_UNAVAILABLE' ? 503
@@ -48,7 +49,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       AI_PROVIDER_UNAVAILABLE: 'Gemini is temporarily unavailable. Try again shortly.',
       AI_PROVIDER_REQUEST_FAILED: 'The AI provider request failed. Check Render logs for the NOVA AI error code.',
     };
-    console.warn('[NOVA AI] request failed', { code, errorType: err.name || 'Error', providerStatus: /^\\d{3}$/.test(providerStatus) ? providerStatus : undefined });
+    console.warn('[NOVA AI] request failed', { code, errorType: err.name || 'Error', providerStatus: numericStatus >= 100 && numericStatus <= 599 ? numericStatus : undefined });
     res.status(status).json({ success: false, error: { code, message: messages[code] || 'NOVA could not complete that request.' } });
   }
 });
