@@ -19,6 +19,7 @@ import { initializeDatabase, isDatabaseConnected } from './database/db.ts';
 import accountsRouter from './backend/routes/accounts.ts';
 import tradesRouter from './backend/routes/trades.ts';
 import connectorRouter from './backend/routes/connector.ts';
+import profileRouter from './backend/routes/profile.ts';
 import financeRouter from './backend/routes/finance.ts';
 import authRouter, { requireAuth } from './backend/routes/auth.ts';
 
@@ -70,6 +71,7 @@ async function startServer() {
   app.use('/api/accounts', requireAuth, accountsRouter);
   app.use('/api/trades', requireAuth, tradesRouter);
   app.use('/api/finance', requireAuth, financeRouter);
+  app.use('/api/profile', requireAuth, profileRouter);
   app.use('/api/connector', (req, res, next) => {
     if (req.path === '/sync-webhook') return next();
     return requireAuth(req, res, next);

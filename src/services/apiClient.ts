@@ -50,6 +50,19 @@ export class ApiClient {
     if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
     return data;
   }
+  public static getFinanceHistory(): Promise<any[]> { return this.finance('/history').then((d) => d.data); }
+  private static async profileCall(path: string, init: RequestInit = {}): Promise<any> {
+    let res: Response;
+    try {
+      res = await this.request(`${this.baseUrl}/profile${path}`, { ...init, headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(10000) });
+    } catch { throw new Error('Could not reach the NOVA backend.'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+    return data;
+  }
+  public static getProfile(): Promise<any> { return this.profileCall('').then((d) => d.data); }
+  public static updateProfile(patch: object): Promise<any> { return this.profileCall('', { method: 'PATCH', body: JSON.stringify(patch) }).then((d) => d.data); }
+  public static changePassword(current: string, next: string): Promise<void> { return this.profileCall('/password', { method: 'POST', body: JSON.stringify({ current, next }) }).then(() => undefined); }
   public static async getFinanceItems(): Promise<any[]> { return (await this.finance('')).data; }
   public static addFinanceItem(item: object) { return this.finance('', { method: 'POST', body: JSON.stringify(item) }); }
   public static updateFinanceItem(id: string, value: number) { return this.finance(`/${id}`, { method: 'PATCH', body: JSON.stringify({ value }) }); }
