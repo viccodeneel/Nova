@@ -13,13 +13,14 @@ type AccountInfo = {
 type DashboardSummary = {
   profile: { display_name: string; currency: string; networth_goal: number | null };
   accounts: Array<{ name: string; broker: string; currency: string; balance: number; equity: number; connection_status: string; last_synced_at: string | null; open_positions: number; recorded_trades: number; daily_drawdown: number; max_drawdown: number }>;
+  open_positions: Array<{ account_name: string; currency: string; symbol: string; direction: string; volume: number; current_price: number; current_profit: number }>;
   trading_performance_by_currency: Array<{ currency: string; closed_trades: number; wins: number; losses: number; breakevens: number; net_profit: number; win_rate: number }>;
   recent_trades: Array<{ currency: string; symbol: string; direction: string; outcome: string; net_profit: number; opened_at: string; is_closed: boolean }>;
   net_worth: { currency: string; assets: number; liabilities: number; total: number; goal: number | null };
 };
 
 const needsAccountData = /\b(account|balance|equity|drawdown|position|p&l|profit|loss|floating|realized)\b/i;
-const needsDashboardData = /\b(my name|who am i|profile|dashboard|journal|analytics|net worth|net-worth|assets|liabilities|recent trades|trade history|my trades|trade performance|win rate|my week|how many trades|trade count|accounts|drawdown)\b/i;
+const needsDashboardData = /\b(my name|who am i|profile|dashboard|journal|analytics|net worth|net-worth|assets|liabilities|recent trades|trade history|my trades|trade performance|win rate|my week|how many trades|trade count|accounts|drawdown|open positions|positions)\b/i;
 const asksForAnalysis = /\b(analy[sz]e|review|compare|summari[sz]e|insight|pattern|mistake|improve|how did i do|how am i doing|my week|my month|performance)\b/i;
 const explicitNavigation = /\b(?:open|go to|take me to|navigate to|switch to|show(?: me)?)\s+(?:(?:the|my)\s+)?(dashboard|overview|trade journal|journal|analytics|accounts|net worth|settings|nova|ai)\b/i;
 const navigationPages: Record<string, { page: NavSection; label: string }> = {
@@ -68,6 +69,11 @@ function dashboardAnswer(message: string, data: DashboardSummary): string {
   }
   if (/\b(net worth|net-worth|assets|liabilities)\b/i.test(message)) {
     return `Net Worth: assets ${money(data.net_worth.assets, data.net_worth.currency)}, liabilities ${money(data.net_worth.liabilities, data.net_worth.currency)}, total ${money(data.net_worth.total, data.net_worth.currency)}.`;
+  }
+  if (/\b(open positions|positions)\b/i.test(message)) {
+    return data.open_positions.length
+      ? data.open_positions.slice(0, 6).map((position) => \`\${position.account_name}: \${position.direction} \${position.volume} \${position.symbol}, floating P&L \${money(position.current_profit, position.currency)}.\`).join(' ')
+      : 'There are no open positions on the verified MT5 account(s).';
   }
   if (/\b(drawdown)\b/i.test(message)) {
     return data.accounts.length
