@@ -154,7 +154,7 @@ export class AnthropicProvider implements AssistantProvider {
         if (!payloadText || payloadText === '[DONE]') continue;
         const event = JSON.parse(payloadText) as { type?: string; delta?: { type?: string; text?: string }; error?: { type?: string; message?: string } };
         if (event.type === 'error') {
-          throw Object.assign(new Error('Anthropic stream failed.'), { providerErrorType: event.error?.type, providerMessage: event.error?.message });
+          throw Object.assign(new Error('Anthropic stream failed.'), {\n            status: /rate_limit/i.test(event.error?.type || '') ? 429 : /overloaded/i.test(event.error?.type || '') ? 503 : undefined,\n            providerErrorType: event.error?.type,\n            providerMessage: event.error?.message?.replaceAll(this.apiKey, '[REDACTED]').slice(0, 300),\n          });
         }
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
           answer += event.delta.text;
@@ -162,6 +162,16 @@ export class AnthropicProvider implements AssistantProvider {
         }
       }
       if (done) break;
+    }
+    if (buffer.startsWith('data:')) {
+      const payloadText = buffer.slice(5).trim();
+      if (payloadText && payloadText !== '[DONE]') {
+        const event = JSON.parse(payloadText) as { type?: string; delta?: { type?: string; text?: string }; error?: { type?: string; message?: string } };
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+          answer += event.delta.text;
+          onText(event.delta.text);
+        }
+      }
     }
     return answer.trim();
   }
