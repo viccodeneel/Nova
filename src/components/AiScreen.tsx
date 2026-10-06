@@ -1,19 +1,44 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { ApiClient } from '../services/apiClient.ts';
 
 export type LinkState = 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'NONE';
 
 const tone = (ok: boolean | 'warn') => (ok === true ? 'text-emerald-400' : ok === 'warn' ? 'text-amber-400' : 'text-slate-500');
 
 // Every status row below reflects real state. Nothing here pretends the AI core exists yet.
-export const AiScreen: React.FC<{ mt5: LinkState; name?: string }> = ({ mt5, name }) => {
+export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId?: string }> = ({ mt5, name, activeAccountId }) => {
   const h = new Date().getHours();
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'nova'; text: string }>>([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [aiReady, setAiReady] = useState<boolean | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => { let live = true; ApiClient.getAiStatus().then((v) => { if (live) setAiReady(v.enabled); }).catch(() => { if (live) setAiReady(false); }); return () => { live = false; }; }, []);
   const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
-    ['Reasoning core', 'NOT INSTALLED', false],
+    ['Reasoning core', aiReady === null ? 'CHECKING' : aiReady ? 'TEXT READY' : 'NOT CONFIGURED', aiReady === true],
     ['Voice interface', 'NOT INSTALLED', false],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || busy) return;
+    setMessages((old) => [...old, { role: 'user', text }]);
+    setInput('');
+    setError('');
+    setBusy(true);
+    try {
+      const result = await ApiClient.askAi(text, activeAccountId);
+      setMessages((old) => [...old, { role: 'nova', text: result.response, account: result.account as AccountSnapshot | undefined }]);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
       <section className="hud-panel relative flex min-h-[520px] sm:min-h-[560px] flex-col items-center justify-center overflow-hidden p-5 sm:p-8">
@@ -34,11 +59,28 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string }> = ({ mt5, nam
         </svg>
         <p className="mt-4 font-label-tech text-xs uppercase tracking-[0.4em] text-cyan-300">NOVA · standby</p>
         <h1 className="mt-3 text-center text-2xl font-semibold text-white sm:text-3xl">{greeting}{name ? `, ${name}` : ''}</h1>
-        <p className="mt-2 max-w-sm text-center text-sm text-slate-400">The AI core isn’t installed yet. This is the interface it will live in.</p>
-        <div className="mt-8 flex w-full max-w-lg items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 opacity-60">
-          <span className="material-symbols-outlined text-slate-500">mic_off</span>
-          <input disabled placeholder="AI core not connected" className="w-full bg-transparent text-sm text-slate-400 outline-none" />
+        <p className="mt-2 max-w-sm text-center text-sm text-slate-400">Ask about your account. NOVA checks connected account data before answering account questions.</p>
+        <div aria-live="polite" className="mt-5 flex max-h-36 w-full max-w-lg flex-col gap-2 overflow-y-auto">
+          {messages.slice(-4).map((m, i) => <div key={i} className={m.role === 'user' ? 'self-end' : 'self-start'}>
+            <p className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'bg-cyan-500/10 text-cyan-100' : 'bg-white/5 text-slate-200'}`}>{m.text}</p>
+            {m.account && <div className="mt-2 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-3 text-xs">
+              <div className="mb-2 flex items-center justify-between gap-3"><span className="truncate text-slate-300">Selected MT5 account · verified snapshot</span><span className={m.account.connection_status === 'CONNECTED' ? 'text-emerald-300' : 'text-amber-300'}>{m.account.connection_status}</span></div>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-slate-400">
+                <span>Balance</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.balance).toFixed(2)}</span>
+                <span>Equity</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.equity).toFixed(2)}</span>
+                <span>Realized today (UTC)</span><span className="text-right text-slate-200">{m.account.currency} {Number(m.account.realized_pnl_today).toFixed(2)}</span>
+                <span>Open positions</span><span className="text-right text-slate-200">{m.account.open_positions}</span>
+              </div>
+              {m.account.last_synced_at && <p className="mt-2 text-right text-[10px] text-slate-600">Synced {new Date(m.account.last_synced_at).toLocaleString()}</p>}
+            </div>}
+          </div>)}
         </div>
+        {error && <p role="alert" className="mt-2 w-full max-w-lg text-sm text-rose-300">{error}</p>}
+        <form onSubmit={submit} className="mt-4 flex w-full max-w-lg items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+          <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} maxLength={2000} aria-label="Ask NOVA" placeholder="Ask NOVA about your account…" className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500" />
+          <button type="submit" disabled={busy || !input.trim()} className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-40">{busy ? '…' : 'Ask'}</button>
+        </form>
+        <p className="mt-2 text-[11px] text-slate-600">Text assistant only. Voice input is a later milestone.</p>
       </section>
       <aside className="hud-panel p-5">
         <h2 className="font-label-tech text-[11px] uppercase tracking-[0.25em] text-cyan-300">System status</h2>
@@ -50,6 +92,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string }> = ({ mt5, nam
             </li>
           ))}
         </ul>
+        {aiReady === false && <p className="mt-4 text-xs text-slate-500">Set GEMINI_API_KEY in the backend environment to enable text reasoning.</p>}
       </aside>
     </div>
   );
