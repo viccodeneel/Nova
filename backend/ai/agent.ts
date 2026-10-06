@@ -72,7 +72,7 @@ function dashboardAnswer(message: string, data: DashboardSummary): string {
   }
   if (/\b(open positions|positions)\b/i.test(message)) {
     return data.open_positions.length
-      ? data.open_positions.slice(0, 6).map((position) => \`\${position.account_name}: \${position.direction} \${position.volume} \${position.symbol}, floating P&L \${money(position.current_profit, position.currency)}.\`).join(' ')
+      ? data.open_positions.slice(0, 6).map((position) => position.account_name + ': ' + position.direction + ' ' + position.volume + ' ' + position.symbol + ', floating P&L ' + money(position.current_profit, position.currency) + '.').join(' ')
       : 'There are no open positions on the verified MT5 account(s).';
   }
   if (/\b(drawdown)\b/i.test(message)) {
