@@ -27,7 +27,7 @@ export class ApiClient {
     return response;
   }
 
-  public static async askAi(message: string, accountId?: string): Promise<{ response: string; toolCalls: Array<{ name: string; success: boolean }>; account: Record<string, unknown> | null }> {
+  public static async askAi(message: string, accountId?: string): Promise<{ response: string; toolCalls: Array<{ name: string; success: boolean }>; account: { account_name: string; currency: string; connection_status: string; balance: number; equity: number; realized_pnl_today: number; open_positions: number; last_synced_at: string | null } | null }> {
     const res = await this.request(`${this.baseUrl}/ai/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, account_id: accountId }), signal: AbortSignal.timeout(30000) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) throw new Error(data.error?.message || 'NOVA could not answer that request.');
