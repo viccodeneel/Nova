@@ -178,6 +178,8 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     waitingForReplyRef.current = false;
     voiceSpeakingRef.current = false;
     setVoiceSpeaking(false);
+    setVoicePulse(0);
+    if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
     if (!voiceConversationRef.current) return;
     setVoiceFeedback('Listening for your next message…');
     if (recognitionRef.current) return;
@@ -199,7 +201,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     };
     utterance.onboundary = (event) => {
       spokenCharIndexRef.current = event.charIndex;
-      const word = text.slice(event.charIndex).match(/^[\\p{L}\\p{N}']+/u)?.[0] || '';
+      const word = text.slice(event.charIndex).match(/^[A-Za-z0-9']+/)?.[0] || '';
       const pulse = Math.min(0.14, 0.04 + word.length * 0.009);
       setVoicePulse(pulse + (voicePulseSequence % 2) * 0.008);
       setVoicePulseSequence((count) => count + 1);
@@ -340,7 +342,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
                 {voiceSpeaking ? 'NOVA is speaking' : busy ? 'NOVA is thinking' : listening ? 'Listening — speak naturally' : 'Voice chat is paused'}
               </p>
               <p className="mt-2 text-xs text-slate-500 sm:text-sm">
-                {voiceSpeaking ? 'Tap the orb to interrupt and reply.' : 'Tap the orb again to end voice chat.'}
+                {voiceSpeaking ? 'Speak over NOVA or tap the orb to interrupt.' : 'Tap the orb again to end voice chat.'}
               </p>
               {error && <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p>}
               {voiceFeedback && <p className="mt-3 text-xs text-cyan-200">{voiceFeedback}</p>}
