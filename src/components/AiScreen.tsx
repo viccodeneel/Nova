@@ -63,7 +63,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
-    ['Reasoning core', aiReady === null ? 'CHECKING' : aiReady ? 'TEXT READY' : 'NOT CONFIGURED', aiReady === true],
+    ['Reasoning core', aiReady === null ? 'CHECKING' : aiReady ? 'CONFIGURED' : 'NOT CONFIGURED', aiReady === true],
     ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
@@ -226,13 +226,25 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
 
   const submitMessage = async (text: string, speak: boolean) => {
     if (!text || busy) { waitingForReplyRef.current = false; return; }
-    setMessages((old) => [...old, { role: 'user', text }]);
+    setMessages((old) => [...old, { role: 'user', text }, ...(!speak ? [{ role: 'nova' as const, text: '' }] : [])]);
     setInput('');
     setError('');
     setBusy(true);
+    const onChunk = speak ? undefined : (chunk: string) => {
+      setMessages((old) => {
+        const lastAssistant = old.findLastIndex((message) => message.role === 'nova');
+        if (lastAssistant < 0) return [...old, { role: 'nova', text: chunk }];
+        return old.map((message, index) => index === lastAssistant ? { ...message, text: message.text + chunk } : message);
+      });
+    };
     try {
-      const result = await ApiClient.askAi(text, activeAccountId);
-      setMessages((old) => [...old, { role: 'nova', text: result.response, account: result.account || undefined }]);
+      const result = await ApiClient.askAi(text, activeAccountId, onChunk);
+      setMessages((old) => {
+        if (speak) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
+        const lastAssistant = old.findLastIndex((message) => message.role === 'nova');
+        if (lastAssistant < 0) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
+        return old.map((message, index) => index === lastAssistant ? { ...message, text: result.response, account: result.account || undefined } : message);
+      });
       if (result.navigation) {
         if (speak) {
           pendingNavigationRef.current = result.navigation.page;
@@ -245,6 +257,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
         speakResponse(result.response);
       }
     } catch (e) {
+      setMessages((old) => old.filter((message, index) => !(index === old.length - 1 && message.role === 'nova' && !message.text)));
       setError((e as Error).message);
       if (speak) speakResponse('Sorry, I could not get a reply just now. Please try again.');
     } finally {
