@@ -27,11 +27,50 @@ export class ApiClient {
     return response;
   }
 
-  public static async askAi(message: string, accountId?: string): Promise<{ response: string; toolCalls: Array<{ name: string; success: boolean }>; account: { currency: string; connection_status: string; balance: number; equity: number; realized_pnl_today: number; open_positions: number; last_synced_at: string | null } | null; dashboard: Record<string, unknown> | null; navigation: { page: NavSection; label: string } | null }> {
-    const res = await this.request(`${this.baseUrl}/ai/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, account_id: accountId }), signal: AbortSignal.timeout(30000) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.success) throw new Error(data.error?.message || 'NOVA could not answer that request.');
-    return data.data;
+  public static async askAi(message: string, accountId?: string, onChunk?: (text: string) => void): Promise<{ response: string; toolCalls: Array<{ name: string; success: boolean }>; account: { currency: string; connection_status: string; balance: number; equity: number; realized_pnl_today: number; open_positions: number; last_synced_at: string | null } | null; dashboard: Record<string, unknown> | null; navigation: { page: NavSection; label: string } | null }> {
+    const streaming = Boolean(onChunk);
+    const res = await this.request(`${this.baseUrl}/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(streaming ? { Accept: 'text/event-stream' } : {}) },
+      body: JSON.stringify({ message, account_id: accountId, stream: streaming }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!streaming || !res.ok || !res.headers.get('content-type')?.includes('text/event-stream')) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error?.message || 'NOVA could not answer that request.');
+      return data.data;
+    }
+    if (!res.body) throw new Error('NOVA did not return a response stream.');
+
+    let responseText = '';
+    let completed: any = null;
+    const consumeEvent = (block: string) => {
+      const line = block.split(/\\r?\\n/).find((item) => item.startsWith('data:'));
+      if (!line) return;
+      const event = JSON.parse(line.slice(5).trim());
+      if (event.type === 'chunk' && typeof event.text === 'string') {
+        responseText += event.text;
+        onChunk?.(event.text);
+      } else if (event.type === 'done') {
+        completed = event.data;
+      } else if (event.type === 'error') {
+        throw new Error(event.error?.message || 'NOVA could not complete that request.');
+      }
+    };
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const blocks = buffer.split(/\\r?\\n\\r?\\n/);
+      buffer = blocks.pop() || '';
+      for (const block of blocks) consumeEvent(block);
+      if (done) break;
+    }
+    if (buffer.trim()) consumeEvent(buffer);
+    if (!completed) throw new Error('NOVA response stream ended before completion.');
+    return { ...completed, response: responseText || completed.response || '' };
   }
   public static async getAiStatus(): Promise<{ enabled: boolean }> {
     const res = await this.request(`${this.baseUrl}/ai/status`, { signal: AbortSignal.timeout(8000) });
