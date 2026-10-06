@@ -10,16 +10,43 @@ router.get('/status', (_req: Request, res: Response) => {
 });
 
 router.post('/chat', async (req: Request, res: Response) => {
+  const started = Date.now();
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
   const accountId = typeof req.body?.account_id === 'string' ? req.body.account_id : undefined;
+  const stream = req.body?.stream === true;
   if (!message || message.length > 2000) {
     return res.status(400).json({ success: false, error: { code: 'INVALID_MESSAGE', message: 'Enter a message of 1 to 2000 characters.' } });
   }
   if (accountId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) {
     return res.status(400).json({ success: false, error: { code: 'INVALID_ACCOUNT', message: 'The selected account ID is invalid.' } });
   }
+
+  const providerName = (process.env.NOVA_AI_PROVIDER || 'gemini').trim().toLowerCase();
+  const sendEvent = (data: Record<string, unknown>) => {
+    if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
   try {
+    if (stream) {
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+      let sentText = false;
+      const data = await runNovaAssistant(message, { accountId }, undefined, (text) => {
+        sentText = true;
+        sendEvent({ type: 'chunk', text });
+      });
+      if (!sentText) sendEvent({ type: 'chunk', text: data.response });
+      sendEvent({ type: 'done', data });
+      console.info('[NOVA AI] stream completed', { provider: data.navigation ? 'none' : providerName, durationMs: Date.now() - started, receivedText: sentText });
+      res.end();
+      return;
+    }
+
     const data = await runNovaAssistant(message, { accountId });
+    console.info('[NOVA AI] request completed', { provider: data.navigation || data.toolCalls.some((tool) => tool.name === 'read_dashboard') ? 'none' : providerName, durationMs: Date.now() - started });
     res.json({ success: true, data });
   } catch (error) {
     const err = error as Error & { code?: string; status?: number | string; statusCode?: number | string; providerErrorType?: string; providerMessage?: string; providerStage?: string };
@@ -54,14 +81,20 @@ router.post('/chat', async (req: Request, res: Response) => {
       AI_PROVIDER_REQUEST_FAILED: 'The AI provider request failed. Check Render logs for the NOVA AI error code.',
     };
     console.warn('[NOVA AI] request failed', {
-      code,
+      code, provider: providerName, durationMs: Date.now() - started,
       errorType: err.name || 'Error',
       providerStatus: numericStatus >= 100 && numericStatus <= 599 ? numericStatus : undefined,
       providerErrorType: err.providerErrorType,
       providerStage: err.providerStage,
       providerMessage: err.providerMessage,
     });
-    res.status(status).json({ success: false, error: { code, message: messages[code] || 'NOVA could not complete that request.' } });
+    const errorPayload = { code, message: messages[code] || 'NOVA could not complete that request.' };
+    if (stream && res.headersSent) {
+      sendEvent({ type: 'error', error: errorPayload });
+      res.end();
+      return;
+    }
+    res.status(status).json({ success: false, error: errorPayload });
   }
 });
 
