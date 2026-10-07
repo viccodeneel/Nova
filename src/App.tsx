@@ -20,6 +20,8 @@ import { Mt5ImportModal } from './components/Mt5ImportModal';
 import { LoginScreen } from './components/LoginScreen';
 import { ConnectAccountScreen } from './components/ConnectAccountScreen';
 import { AiScreen, type LinkState } from './components/AiScreen';
+import { useNovaVoice } from './voice/useNovaVoice';
+import { NovaOrbDock } from './components/NovaOrbDock';
 import { NetWorthScreen } from './components/NetWorthScreen';
 import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
 import { ApiClient } from './services/apiClient.ts';
@@ -127,6 +129,9 @@ export default function App() {
     ApiClient.getProfile().then(setProfile).catch(() => undefined);
   }, [authToken]);
   const handleGoalChange = async (goal: number | null) => setProfile(await ApiClient.updateProfile({ networth_goal: goal }));
+  // One NOVA engine for the whole app: conversations survive tab changes and the wake word works anywhere.
+  const nova = useNovaVoice({ enabled: Boolean(authToken), onNavigate: setActiveNav, getAccountId: () => activeAccountId });
+  const wakeProps = { supported: nova.wakeSupported, enabled: nova.wakeEnabled, status: nova.wakeStatus, onChange: nova.setWakeEnabled };
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
   // Header Interactive States
@@ -637,9 +642,9 @@ export default function App() {
         <main className="relative mx-auto w-full max-w-6xl p-5 sm:p-8">
           <div key={activeNav} className="nova-enter">
             {activeNav === 'accounts' ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
-              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} onNavigate={setActiveNav} />
+              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} nova={nova} />
               : activeNav === 'finance' ? <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />
-              : activeNav === 'settings' ? <SettingsPanel profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />
+              : activeNav === 'settings' ? <SettingsPanel wake={wakeProps} profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />
               : activeNav === 'analytics' ? <AnalyticsScreen trades={trades} />
               : (
                 <section className="hud-panel p-8 sm:p-12">
@@ -652,6 +657,7 @@ export default function App() {
           </div>
         </main>
         {toast}
+        <NovaOrbDock nova={nova} activeNav={activeNav} />
       </div>
     );
   }
@@ -1041,7 +1047,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} activeAccountId={activeAccount?.id} onNavigate={setActiveNav} />}
+          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} nova={nova} />}
           {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
           {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
 
@@ -1071,7 +1077,7 @@ export default function App() {
           )}
 
           {activeNav === 'settings' && (
-            <SettingsPanel
+            <SettingsPanel wake={wakeProps}
               profile={profile}
               onProfileChange={setProfile}
               accounts={accounts}
@@ -1094,6 +1100,7 @@ export default function App() {
       </nav>
 
       {toast}
+      <NovaOrbDock nova={nova} activeNav={activeNav} />
 
       {/* MT5 Statement File / Past Deals Importer */}
       <Mt5ImportModal

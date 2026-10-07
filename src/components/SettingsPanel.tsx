@@ -30,9 +30,10 @@ const Msg: React.FC<{ m: { ok: boolean; t: string } | null }> = ({ m }) => m ? <
 interface Props {
   profile: Profile; onProfileChange: (p: Profile) => void; accounts: PropAccount[];
   onDeleteAccount: (id: string) => void | Promise<void>; onConnect: () => void; onSignOut?: () => void;
+  wake?: { supported: boolean; enabled: boolean; status: string; onChange: (on: boolean) => void };
 }
 
-export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accounts, onDeleteAccount, onConnect, onSignOut }) => {
+export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accounts, onDeleteAccount, onConnect, onSignOut, wake }) => {
   const [name, setName] = useState(profile.display_name);
   const [pm, setPm] = useState<{ ok: boolean; t: string } | null>(null);
   const [cur, setCur] = useState(''); const [nw, setNw] = useState(''); const [nw2, setNw2] = useState('');
@@ -85,6 +86,23 @@ export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accou
           {['USD', 'GHS', 'EUR', 'GBP'].map((c) => <option key={c}>{c}</option>)}
         </select>
       </Card>
+
+      {wake && (
+        <Card title="Voice" hint="Say “Hey NOVA” on any tab and NOVA slides in from the right.">
+          <label className="flex cursor-pointer items-center justify-between gap-4">
+            <span className="text-sm text-white">Wake word</span>
+            <input type="checkbox" role="switch" checked={wake.enabled} disabled={!wake.supported} onChange={(e) => wake.onChange(e.target.checked)} className="h-5 w-5 accent-cyan-400" />
+          </label>
+          <p className="mt-3 text-xs text-slate-500">
+            {!wake.supported ? 'This browser does not support speech recognition. Use a recent Chrome or Edge.'
+              : wake.status === 'blocked' ? 'Microphone access is blocked. Allow it in your browser settings, then switch this back on.'
+              : wake.enabled ? 'Listening for “NOVA” while this tab is open.' : 'Off. NOVA only listens when you start a conversation.'}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
+            While on, your browser keeps the microphone open and streams audio to its speech service (Google, for Chrome) to detect the wake word. It only works with this tab open, and it won’t work on a freshly loaded page until you click once.
+          </p>
+        </Card>
+      )}
 
       <Card title="Password" hint="At least 12 characters. Other signed-in devices stay signed in until their session expires (12 hours).">
         <form onSubmit={changePw} className="flex flex-col gap-3">
