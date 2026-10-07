@@ -88,7 +88,7 @@ export const TradeJournalScreen: React.FC<TradeJournalScreenProps> = ({
       newOutcome === 'LOSS' ? -Math.abs(pnlVal) : newOutcome === 'BE' ? 0 : Math.abs(pnlVal);
 
     const created: TradeExecution = {
-      id: `MT5-${Math.floor(88425 + Math.random() * 900)}`,
+      id: `MANUAL-${Date.now().toString(36).toUpperCase()}`,
       accountId: targetSyncAccount?.id,
       time: 'Just now',
       instrument: newInstrument,

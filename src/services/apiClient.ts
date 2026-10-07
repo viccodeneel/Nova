@@ -33,7 +33,7 @@ export class ApiClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(streaming ? { Accept: 'text/event-stream' } : {}) },
       body: JSON.stringify({ message, account_id: accountId, stream: streaming }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
     if (!streaming || !res.ok || !res.headers.get('content-type')?.includes('text/event-stream')) {
       const data = await res.json().catch(() => ({}));
@@ -72,8 +72,8 @@ export class ApiClient {
     if (!completed) throw new Error('NOVA response stream ended before completion.');
     return { ...completed, response: responseText || completed.response || '' };
   }
-  public static async getAiStatus(): Promise<{ enabled: boolean }> {
-    const res = await this.request(`${this.baseUrl}/ai/status`, { signal: AbortSignal.timeout(8000) });
+  public static async getAiStatus(): Promise<{ enabled: boolean; provider: string | null; expected_key?: string }> {
+    const res = await this.request(`${this.baseUrl}/ai/status`, { signal: AbortSignal.timeout(25000) });
     if (!res.ok) throw new Error('Could not read NOVA AI status.');
     return (await res.json()).data;
   }
