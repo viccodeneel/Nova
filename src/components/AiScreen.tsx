@@ -1,72 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Mic, MicOff } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ApiClient } from '../services/apiClient.ts';
-import { createSpeechRecognition, isSpeechRecognitionSupported } from '../services/speechRecognition.ts';
-import type { SpeechRecognitionErrorEventLike } from '../services/speechRecognition.ts';
-import type { NavSection } from '../data/terminalData.ts';
+import type { NovaVoice } from '../voice/useNovaVoice.ts';
 
 export type LinkState = 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'NONE';
 
 const tone = (ok: boolean | 'warn') => (ok === true ? 'text-emerald-400' : ok === 'warn' ? 'text-amber-400' : 'text-slate-500');
-type AccountSnapshot = NonNullable<Awaited<ReturnType<typeof ApiClient.askAi>>['account']>;
-type ChatMessage = { role: 'user' | 'nova'; text: string; account?: AccountSnapshot };
+const WAKE_LABEL = { off: 'OFF', listening: 'LISTENING', paused: 'LISTENING', blocked: 'MIC BLOCKED', unsupported: 'UNSUPPORTED' } as const;
 
-const speechErrorMessage = (event: SpeechRecognitionErrorEventLike): string => {
-  switch (event.error) {
-    case 'not-allowed':
-    case 'service-not-allowed':
-      return 'Microphone access was blocked. Allow microphone access for NOVA in your browser settings.';
-    case 'audio-capture':
-      return 'No microphone was found. Connect or enable a microphone and try again.';
-    case 'no-speech':
-      return 'No speech was detected. Try speaking a little closer to the microphone.';
-    case 'network':
-      return 'The browser speech service could not be reached. Check your connection and try again.';
-    default:
-      return 'Voice input stopped unexpectedly. Please try again.';
-  }
-};
-
-// Every status row below reflects real state. Nothing here pretends the AI core exists yet.
-export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId?: string; onNavigate?: (page: NavSection) => void }> = ({ mt5, name, activeAccountId, onNavigate }) => {
+// Every status row below reflects real state. The conversation engine lives in useNovaVoice (app level),
+// so voice sessions keep running when you switch tabs.
+export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice }> = ({ mt5, name, nova }) => {
   const h = new Date().getHours();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
+  const {
+    messages, input, setInput, busy, error, listening, voiceFeedback, voiceConversation, voiceSpeaking, voicePulse,
+    handleOrbClick, toggleListening, sendText, speechSupported, voiceConversationSupported, conversationEndRef,
+  } = nova;
+  const chatStarted = messages.length > 0;
   const [aiReady, setAiReady] = useState<boolean | null>(null);
   const [aiUnreachable, setAiUnreachable] = useState(false);
   const [aiKeyName, setAiKeyName] = useState('ANTHROPIC_API_KEY');
-  const [error, setError] = useState('');
-  const [listening, setListening] = useState(false);
-  const [voiceFeedback, setVoiceFeedback] = useState('');
-  const [voiceConversation, setVoiceConversation] = useState(false);
-  const [voiceSpeaking, setVoiceSpeaking] = useState(false);
-  const [voicePulse, setVoicePulse] = useState(0);
-  const [voicePulseSequence, setVoicePulseSequence] = useState(0);
-  const voiceSpeakingRef = useRef(false);
-  const spokenTextRef = useRef('');
-  const spokenCharIndexRef = useRef(0);
-  const voicePulseTimeoutRef = useRef<number | null>(null);
-  const voiceConversationRef = useRef(false);
-  const waitingForReplyRef = useRef(false);
-  const recognitionRef = useRef<ReturnType<typeof createSpeechRecognition>>(null);
-  const speechHadResultRef = useRef(false);
-  const speechHadErrorRef = useRef(false);
-  const conversationEndRef = useRef<HTMLDivElement>(null);
-  const pendingNavigationRef = useRef<NavSection | null>(null);
-  const busyRef = useRef(false);
-  const queuedRef = useRef<{ text: string; speak: boolean } | null>(null);
-  const keepSpeechRef = useRef(false);
-  const accountIdRef = useRef(activeAccountId);
-  accountIdRef.current = activeAccountId;
-  const onNavigateRef = useRef(onNavigate);
-  onNavigateRef.current = onNavigate;
-  const chatStarted = messages.length > 0;
-  useEffect(() => { conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, busy]);
-  const speechSupported = isSpeechRecognitionSupported();
-  const speechOutputSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
-  const voiceConversationSupported = speechSupported && speechOutputSupported;
   useEffect(() => {
     // Doubles as a backend warm-up: a sleeping host gets a few chances before we report it unreachable.
     let live = true;
@@ -78,292 +32,19 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
     check(0);
     return () => { live = false; };
   }, []);
-  useEffect(() => () => { voiceConversationRef.current = false; recognitionRef.current?.abort(); recognitionRef.current = null; if (typeof window !== 'undefined' && 'speechSynthesis' in window && !keepSpeechRef.current) window.speechSynthesis.cancel(); }, []);
   const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
     ['Reasoning core', aiUnreachable ? 'BACKEND UNREACHABLE' : aiReady === null ? 'CHECKING' : aiReady ? 'CONFIGURED' : 'NOT CONFIGURED', aiUnreachable ? 'warn' : aiReady === true],
     ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
+    ['Wake word', WAKE_LABEL[nova.wakeStatus], nova.wakeStatus === 'listening' || nova.wakeStatus === 'paused' ? true : false],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
-  const isNovaSpeechEcho = (transcript: string): boolean => {
-    const normalized = transcript.toLowerCase().replace(/[^a-z0-9']+/g, ' ').trim();
-    if (normalized.length < 5) return false;
-    const start = Math.max(0, spokenCharIndexRef.current - 70);
-    const spokenWindow = spokenTextRef.current.slice(start, spokenCharIndexRef.current + 190).toLowerCase().replace(/[^a-z0-9']+/g, ' ');
-    if (spokenWindow.includes(normalized)) return true;
-    const words = normalized.split(/\s+/).filter((word) => word.length > 2);
-    if (words.length < 3) return false;
-    const matched = words.filter((word) => spokenWindow.includes(word)).length;
-    return matched / words.length >= 0.78;
-  };
-
-  const toggleListening = (monitorNovaSpeech = false) => {
-    const activeRecognition = recognitionRef.current;
-    if (activeRecognition) {
-      activeRecognition.stop();
-      return;
-    }
-
-    const recognition = createSpeechRecognition();
-    if (!recognition) {
-      setVoiceFeedback('Voice input is not supported in this browser. Try a recent version of Chrome or Edge.');
-      return;
-    }
-
-    speechHadResultRef.current = false;
-    speechHadErrorRef.current = false;
-    setVoiceFeedback('');
-    recognition.lang = navigator.language || 'en-US';
-    recognition.continuous = monitorNovaSpeech;
-    recognition.interimResults = monitorNovaSpeech;
-    recognition.maxAlternatives = 1;
-    recognition.onresult = (event) => {
-      let transcript = '';
-      let hasFinalResult = !monitorNovaSpeech;
-      const firstResult = event.resultIndex ?? 0;
-      for (let index = firstResult; index < event.results.length; index += 1) {
-        transcript += event.results[index]?.[0]?.transcript || '';
-        if (event.results[index]?.isFinal) hasFinalResult = true;
-      }
-      const cleanTranscript = transcript.trim();
-      if (!cleanTranscript) return;
-
-      if (monitorNovaSpeech && voiceConversationRef.current) {
-        if (voiceSpeakingRef.current && isNovaSpeechEcho(cleanTranscript)) return;
-        if (voiceSpeakingRef.current) {
-          pendingNavigationRef.current = null;
-          voiceSpeakingRef.current = false;
-          setVoiceSpeaking(false);
-          setVoicePulse(0);
-          waitingForReplyRef.current = false;
-          window.speechSynthesis.cancel();
-          setVoiceFeedback('I hear you — go ahead.');
-        }
-        if (!hasFinalResult) return;
-        speechHadResultRef.current = true;
-        waitingForReplyRef.current = true;
-        setVoiceFeedback('NOVA is preparing a reply…');
-        recognition.stop();
-        void submitMessage(cleanTranscript, true);
-        return;
-      }
-
-      if (!hasFinalResult) return;
-      speechHadResultRef.current = true;
-      setInput((current) => {
-        const existing = current.trim();
-        const separator = existing ? ' ' : '';
-        const remaining = Math.max(0, 2000 - existing.length - separator.length);
-        return [existing, cleanTranscript.slice(0, remaining)].filter(Boolean).join(separator);
-      });
-      if (voiceConversationRef.current) {
-        waitingForReplyRef.current = true;
-        setVoiceFeedback('NOVA is preparing a reply…');
-        void submitMessage(cleanTranscript, true);
-      } else {
-        setVoiceFeedback('Transcript ready. Review it, then press Ask.');
-      }
-    };
-    recognition.onerror = (event) => {
-      speechHadErrorRef.current = true;
-      setVoiceFeedback(speechErrorMessage(event));
-    };
-    recognition.onend = () => {
-      setListening(false);
-      if (recognitionRef.current === recognition) recognitionRef.current = null;
-      if (!speechHadResultRef.current && !speechHadErrorRef.current) {
-        setVoiceFeedback(voiceConversationRef.current ? 'Listening again…' : 'No speech was detected. Try again when you’re ready.');
-      }
-      if (voiceConversationRef.current && !waitingForReplyRef.current) {
-        if (speechHadErrorRef.current) {
-          voiceConversationRef.current = false;
-          setVoiceConversation(false);
-          return;
-        }
-        window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(voiceSpeakingRef.current); }, 350);
-      }
-    };
-    recognitionRef.current = recognition;
-    setListening(true);
-    try {
-      recognition.start();
-    } catch {
-      recognitionRef.current = null;
-      setListening(false);
-      setVoiceFeedback('Voice input could not start. Check microphone access and try again.');
-    }
-  };
-
-  const finishVoiceTurn = () => {
-    if (!waitingForReplyRef.current) return;
-    waitingForReplyRef.current = false;
-    voiceSpeakingRef.current = false;
-    setVoiceSpeaking(false);
-    setVoicePulse(0);
-    if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
-    if (!voiceConversationRef.current) return;
-    const pendingPage = pendingNavigationRef.current;
-    if (pendingPage) {
-      pendingNavigationRef.current = null;
-      voiceConversationRef.current = false;
-      setVoiceConversation(false);
-      onNavigate?.(pendingPage);
-      return;
-    }
-    setVoiceFeedback('Listening for your next message…');
-    if (recognitionRef.current) return;
-    window.setTimeout(() => { if (voiceConversationRef.current) toggleListening(); }, 350);
-  };
-
-  const speakResponse = (text: string) => {
-    if (!voiceConversationRef.current || !speechOutputSupported) return;
-    window.speechSynthesis.cancel();
-    spokenTextRef.current = text;
-    spokenCharIndexRef.current = 0;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = navigator.language || 'en-US';
-    utterance.onstart = () => {
-      voiceSpeakingRef.current = true;
-      setVoiceSpeaking(true);
-      setVoiceFeedback('NOVA is speaking — speak over me to interrupt.');
-      if (!recognitionRef.current) toggleListening(true);
-    };
-    utterance.onboundary = (event) => {
-      spokenCharIndexRef.current = event.charIndex;
-      const word = text.slice(event.charIndex).match(/^[A-Za-z0-9']+/)?.[0] || '';
-      const pulse = Math.min(0.14, 0.04 + word.length * 0.009);
-      setVoicePulse(pulse + (voicePulseSequence % 2) * 0.008);
-      setVoicePulseSequence((count) => count + 1);
-      if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
-      voicePulseTimeoutRef.current = window.setTimeout(() => setVoicePulse(0), 170);
-    };
-    utterance.onend = finishVoiceTurn;
-    utterance.onerror = finishVoiceTurn;
-    window.speechSynthesis.speak(utterance);
-  };
-
-  const submitMessage = async (text: string, speak: boolean) => {
-    if (!text) { waitingForReplyRef.current = false; return; }
-    if (busyRef.current) {
-      // Never silently drop a spoken message: keep the latest and send it when the current request finishes.
-      if (speak) queuedRef.current = { text, speak }; else waitingForReplyRef.current = false;
-      return;
-    }
-    setMessages((old) => [...old, { role: 'user', text }, ...(!speak ? [{ role: 'nova' as const, text: '' }] : [])]);
-    setInput('');
-    setError('');
-    busyRef.current = true;
-    setBusy(true);
-    const onChunk = speak ? undefined : (chunk: string) => {
-      setMessages((old) => {
-        const lastAssistant = old.reduce((last, message, index) => message.role === 'nova' ? index : last, -1);
-        if (lastAssistant < 0) return [...old, { role: 'nova', text: chunk }];
-        return old.map((message, index) => index === lastAssistant ? { ...message, text: message.text + chunk } : message);
-      });
-    };
-    try {
-      const result = await ApiClient.askAi(text, accountIdRef.current, onChunk);
-      setMessages((old) => {
-        if (speak) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
-        const lastAssistant = old.reduce((last, message, index) => message.role === 'nova' ? index : last, -1);
-        if (lastAssistant < 0) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
-        return old.map((message, index) => index === lastAssistant ? { ...message, text: result.response, account: result.account || undefined } : message);
-      });
-      const nav = result.navigation;
-      if (nav) {
-        if (speak) {
-          // Navigate immediately instead of waiting for a speech-playback event the browser may never fire.
-          // The short confirmation keeps playing on the next screen; the voice session ends with this screen.
-          keepSpeechRef.current = true;
-          waitingForReplyRef.current = false;
-          voiceConversationRef.current = false;
-          setVoiceConversation(false);
-          recognitionRef.current?.abort();
-          recognitionRef.current = null;
-          if (speechOutputSupported) {
-            window.speechSynthesis.cancel();
-            const confirmation = new SpeechSynthesisUtterance(result.response);
-            confirmation.lang = navigator.language || 'en-US';
-            window.speechSynthesis.speak(confirmation);
-          }
-        } else {
-          setVoiceFeedback(`Opening ${nav.label}…`);
-        }
-        onNavigateRef.current?.(nav.page);
-      } else if (speak) {
-        speakResponse(result.response);
-      }
-    } catch (e) {
-      setMessages((old) => old.filter((message, index) => !(index === old.length - 1 && message.role === 'nova' && !message.text)));
-      setError((e as Error).message);
-      if (speak) speakResponse('Sorry, I could not get a reply just now. Please try again.');
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-      const queued = queuedRef.current;
-      queuedRef.current = null;
-      if (queued && voiceConversationRef.current) void submitMessage(queued.text, queued.speak);
-    }
-  };
-
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     const text = input.trim();
     if (!text || busy || listening) return;
-    await submitMessage(text, false);
-  };
-
-  const startVoiceConversation = () => {
-    if (!voiceConversationSupported) {
-      setVoiceFeedback('Voice conversations need speech recognition and speech playback. Try the latest Chrome or Edge.');
-      return;
-    }
-    if (recognitionRef.current) {
-      recognitionRef.current.abort();
-      recognitionRef.current = null;
-      setListening(false);
-    }
-    waitingForReplyRef.current = false;
-    voiceConversationRef.current = true;
-    setVoiceConversation(true);
-    setVoiceFeedback('Voice chat started. Speak naturally; NOVA will answer aloud.');
-    toggleListening();
-  };
-
-  const stopVoiceConversation = () => {
-    voiceConversationRef.current = false;
-    pendingNavigationRef.current = null;
-    voiceSpeakingRef.current = false;
-    setVoiceSpeaking(false);
-    setVoicePulse(0);
-    if (voicePulseTimeoutRef.current !== null) window.clearTimeout(voicePulseTimeoutRef.current);
-    waitingForReplyRef.current = false;
-    setVoiceConversation(false);
-    recognitionRef.current?.abort();
-    recognitionRef.current = null;
-    setListening(false);
-    window.speechSynthesis?.cancel();
-    setVoiceFeedback('Voice conversation ended.');
-  };
-
-  const handleOrbClick = () => {
-    if (!voiceConversationRef.current) {
-      startVoiceConversation();
-      return;
-    }
-    if (voiceSpeakingRef.current) {
-      pendingNavigationRef.current = null;
-      waitingForReplyRef.current = false;
-      voiceSpeakingRef.current = false;
-      setVoiceSpeaking(false);
-      setVoicePulse(0);
-      window.speechSynthesis.cancel();
-      setVoiceFeedback('Interrupted. Listening — go ahead.');
-      if (!recognitionRef.current) toggleListening();
-      return;
-    }
-    stopVoiceConversation();
+    await sendText(text);
   };
 
   return (

@@ -120,3 +120,6 @@
 .hud-panel::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; border-top-left-radius: 16px; }
 .hud-panel::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 16px; }
 @media (prefers-reduced-motion: reduce) { .nova-enter, .nova-spin-slow, .nova-spin-rev, .nova-breathe, .nova-scan { animation: none; } }
+
+.nova-spin-fast { animation: nova-spin 6s linear infinite; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) { .nova-spin-fast { animation: none; } }
