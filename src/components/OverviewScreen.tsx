@@ -24,7 +24,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
     const bTime = Date.parse(b.time);
     return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
   }).slice(0, 5);
-  const closedTrades = accountTrades.filter((trade) => trade.outcome !== 'OPEN');
+  const closedTrades = accountTrades.filter((trade) => (trade.outcome as string) !== 'OPEN');
   const realizedPnl = closedTrades.reduce((total, trade) => total + (Number(trade.pnlValue) || 0), 0);
   const floatingPnl = Number(activeAccount.floatingPnl) || 0;
   const totalPnl = realizedPnl + floatingPnl;

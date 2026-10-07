@@ -35,6 +35,8 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [aiReady, setAiReady] = useState<boolean | null>(null);
+  const [aiUnreachable, setAiUnreachable] = useState(false);
+  const [aiKeyName, setAiKeyName] = useState('ANTHROPIC_API_KEY');
   const [error, setError] = useState('');
   const [listening, setListening] = useState(false);
   const [voiceFeedback, setVoiceFeedback] = useState('');
@@ -53,17 +55,34 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   const speechHadErrorRef = useRef(false);
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const pendingNavigationRef = useRef<NavSection | null>(null);
+  const busyRef = useRef(false);
+  const queuedRef = useRef<{ text: string; speak: boolean } | null>(null);
+  const keepSpeechRef = useRef(false);
+  const accountIdRef = useRef(activeAccountId);
+  accountIdRef.current = activeAccountId;
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
   const chatStarted = messages.length > 0;
   useEffect(() => { conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, busy]);
   const speechSupported = isSpeechRecognitionSupported();
   const speechOutputSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
   const voiceConversationSupported = speechSupported && speechOutputSupported;
-  useEffect(() => { let live = true; ApiClient.getAiStatus().then((v) => { if (live) setAiReady(v.enabled); }).catch(() => { if (live) setAiReady(false); }); return () => { live = false; }; }, []);
-  useEffect(() => () => { voiceConversationRef.current = false; recognitionRef.current?.abort(); recognitionRef.current = null; if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel(); }, []);
+  useEffect(() => {
+    // Doubles as a backend warm-up: a sleeping host gets a few chances before we report it unreachable.
+    let live = true;
+    const check = (attempt: number): void => {
+      ApiClient.getAiStatus()
+        .then((v) => { if (!live) return; setAiUnreachable(false); setAiReady(v.enabled); if (v.expected_key) setAiKeyName(v.expected_key); })
+        .catch(() => { if (!live) return; if (attempt < 2) window.setTimeout(() => check(attempt + 1), 2500); else { setAiUnreachable(true); setAiReady(null); } });
+    };
+    check(0);
+    return () => { live = false; };
+  }, []);
+  useEffect(() => () => { voiceConversationRef.current = false; recognitionRef.current?.abort(); recognitionRef.current = null; if (typeof window !== 'undefined' && 'speechSynthesis' in window && !keepSpeechRef.current) window.speechSynthesis.cancel(); }, []);
   const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
-    ['Reasoning core', aiReady === null ? 'CHECKING' : aiReady ? 'CONFIGURED' : 'NOT CONFIGURED', aiReady === true],
+    ['Reasoning core', aiUnreachable ? 'BACKEND UNREACHABLE' : aiReady === null ? 'CHECKING' : aiReady ? 'CONFIGURED' : 'NOT CONFIGURED', aiUnreachable ? 'warn' : aiReady === true],
     ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
@@ -225,10 +244,16 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
   };
 
   const submitMessage = async (text: string, speak: boolean) => {
-    if (!text || busy) { waitingForReplyRef.current = false; return; }
+    if (!text) { waitingForReplyRef.current = false; return; }
+    if (busyRef.current) {
+      // Never silently drop a spoken message: keep the latest and send it when the current request finishes.
+      if (speak) queuedRef.current = { text, speak }; else waitingForReplyRef.current = false;
+      return;
+    }
     setMessages((old) => [...old, { role: 'user', text }, ...(!speak ? [{ role: 'nova' as const, text: '' }] : [])]);
     setInput('');
     setError('');
+    busyRef.current = true;
     setBusy(true);
     const onChunk = speak ? undefined : (chunk: string) => {
       setMessages((old) => {
@@ -238,21 +263,34 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       });
     };
     try {
-      const result = await ApiClient.askAi(text, activeAccountId, onChunk);
+      const result = await ApiClient.askAi(text, accountIdRef.current, onChunk);
       setMessages((old) => {
         if (speak) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
         const lastAssistant = old.reduce((last, message, index) => message.role === 'nova' ? index : last, -1);
         if (lastAssistant < 0) return [...old, { role: 'nova', text: result.response, account: result.account || undefined }];
         return old.map((message, index) => index === lastAssistant ? { ...message, text: result.response, account: result.account || undefined } : message);
       });
-      if (result.navigation) {
+      const nav = result.navigation;
+      if (nav) {
         if (speak) {
-          pendingNavigationRef.current = result.navigation.page;
-          speakResponse(result.response);
+          // Navigate immediately instead of waiting for a speech-playback event the browser may never fire.
+          // The short confirmation keeps playing on the next screen; the voice session ends with this screen.
+          keepSpeechRef.current = true;
+          waitingForReplyRef.current = false;
+          voiceConversationRef.current = false;
+          setVoiceConversation(false);
+          recognitionRef.current?.abort();
+          recognitionRef.current = null;
+          if (speechOutputSupported) {
+            window.speechSynthesis.cancel();
+            const confirmation = new SpeechSynthesisUtterance(result.response);
+            confirmation.lang = navigator.language || 'en-US';
+            window.speechSynthesis.speak(confirmation);
+          }
         } else {
-          setVoiceFeedback(`Opening ${result.navigation.label}…`);
-          window.setTimeout(() => onNavigate?.(result.navigation.page), 900);
+          setVoiceFeedback(`Opening ${nav.label}…`);
         }
+        onNavigateRef.current?.(nav.page);
       } else if (speak) {
         speakResponse(result.response);
       }
@@ -261,7 +299,11 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
       setError((e as Error).message);
       if (speak) speakResponse('Sorry, I could not get a reply just now. Please try again.');
     } finally {
+      busyRef.current = false;
       setBusy(false);
+      const queued = queuedRef.current;
+      queuedRef.current = null;
+      if (queued && voiceConversationRef.current) void submitMessage(queued.text, queued.speak);
     }
   };
 
@@ -418,7 +460,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
               {error && <p role="alert" className="mb-2 text-sm text-rose-300">{error}</p>}
               <form onSubmit={submit} className="mt-3 flex w-full items-center gap-2 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
                 <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} maxLength={2000} aria-label="Ask NOVA" placeholder="Message NOVA…" className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500" />
-                <button type="button" onClick={toggleListening} disabled={busy || voiceConversation || (!speechSupported && !listening)} aria-label={listening ? 'Stop voice input' : 'Start voice input'} aria-pressed={listening} title={listening ? 'Stop listening' : 'Speak to NOVA'} className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${listening ? 'border-rose-400/40 text-rose-300' : 'border-cyan-400/20 text-cyan-200'}`}>
+                <button type="button" onClick={() => toggleListening()} disabled={busy || voiceConversation || (!speechSupported && !listening)} aria-label={listening ? 'Stop voice input' : 'Start voice input'} aria-pressed={listening} title={listening ? 'Stop listening' : 'Speak to NOVA'} className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${listening ? 'border-rose-400/40 text-rose-300' : 'border-cyan-400/20 text-cyan-200'}`}>
                   {listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
                   <span className="hidden sm:inline">{listening ? 'Stop' : 'Talk'}</span>
                 </button>
@@ -432,7 +474,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
               {error && <p role="alert" className="mt-4 w-full max-w-lg text-sm text-rose-300">{error}</p>}
               <form onSubmit={submit} className="mt-6 flex w-full max-w-lg items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
                 <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} maxLength={2000} aria-label="Ask NOVA" placeholder="Ask NOVA about your account…" className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500" />
-                <button type="button" onClick={toggleListening} disabled={busy || (!speechSupported && !listening)} aria-label={listening ? 'Stop voice input' : 'Start voice input'} aria-pressed={listening} title={listening ? 'Stop listening' : 'Speak to NOVA'} className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${listening ? 'border-rose-400/40 text-rose-300' : 'border-cyan-400/20 text-cyan-200'}`}>
+                <button type="button" onClick={() => toggleListening()} disabled={busy || (!speechSupported && !listening)} aria-label={listening ? 'Stop voice input' : 'Start voice input'} aria-pressed={listening} title={listening ? 'Stop listening' : 'Speak to NOVA'} className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${listening ? 'border-rose-400/40 text-rose-300' : 'border-cyan-400/20 text-cyan-200'}`}>
                   {listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
                   <span>{listening ? 'Stop' : 'Talk'}</span>
                 </button>
@@ -454,7 +496,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; activeAccountId
             </li>
           ))}
         </ul>
-        {aiReady === false && <p className="mt-4 text-xs text-slate-500">Set GEMINI_API_KEY in the backend environment to enable text reasoning.</p>}
+        {aiReady === false && <p className="mt-4 text-xs text-slate-500">Set {aiKeyName} in the backend environment to enable text reasoning.</p>}
       </aside>
     </div>
   );

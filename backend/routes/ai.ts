@@ -3,14 +3,22 @@ import { runNovaAssistant } from '../ai/agent.ts';
 
 const router = Router();
 router.get('/status', (_req: Request, res: Response) => {
-  const provider = (process.env.NOVA_AI_PROVIDER || 'gemini').trim().toLowerCase();
+  const provider = (process.env.NOVA_AI_PROVIDER || 'anthropic').trim().toLowerCase();
   const enabled = provider === 'anthropic' ? Boolean(process.env.ANTHROPIC_API_KEY)
     : provider === 'gemini' && Boolean(process.env.GEMINI_API_KEY);
-  res.json({ success: true, data: { enabled, provider: enabled ? provider : null } });
+  const expectedKey = provider === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
+  res.json({ success: true, data: { enabled, provider: enabled ? provider : null, expected_key: expectedKey } });
 });
 
+// Simple per-process spend guard: this is a single-owner app, so one shared window is enough.
+const recent: number[] = [];
 router.post('/chat', async (req: Request, res: Response) => {
   const started = Date.now();
+  while (recent.length && started - recent[0] > 60_000) recent.shift();
+  if (recent.length >= 30) {
+    return res.status(429).json({ success: false, error: { code: 'AI_RATE_LIMITED', message: 'Too many NOVA requests in a minute. Wait a moment and try again.' } });
+  }
+  recent.push(started);
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
   const accountId = typeof req.body?.account_id === 'string' ? req.body.account_id : undefined;
   const stream = req.body?.stream === true;
@@ -21,7 +29,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: { code: 'INVALID_ACCOUNT', message: 'The selected account ID is invalid.' } });
   }
 
-  const providerName = (process.env.NOVA_AI_PROVIDER || 'gemini').trim().toLowerCase();
+  const providerName = (process.env.NOVA_AI_PROVIDER || 'anthropic').trim().toLowerCase();
   const sendEvent = (data: Record<string, unknown>) => {
     if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
   };

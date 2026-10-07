@@ -6,7 +6,7 @@ import { listItems } from '../services/financeService.ts';
 export interface AccountInfo {
   currency: string;
   connection_status: string; last_synced_at: string | null; balance: number; equity: number;
-  floating_pnl: number; starting_balance: number; net_profit: number; realized_pnl_today: number;
+  floating_pnl: number; realized_pnl_today: number;
   closed_trades_today: number; open_positions: number; recorded_trades: number;
 }
 type ToolContext = { accountId?: string };
@@ -16,7 +16,7 @@ type DashboardPage = keyof typeof NAVIGATION_PAGES;
 export const NOVA_TOOLS = [
   {
     name: 'get_account_info',
-    description: 'Read verified MT5 account facts for balance, equity, profit, drawdown, open positions, and recorded trades. Use this for precise questions about the selected account.',
+    description: 'Read verified MT5 account facts: balance, equity, floating and today realized profit, open position count, and recorded trade count. Drawdown is not tracked yet. Use this for precise questions about the selected account.',
     parametersJsonSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -55,8 +55,6 @@ export async function getAccountInfo(context: ToolContext): Promise<AccountInfo>
     connection_status: account.connection_status || 'DISCONNECTED',
     last_synced_at: account.last_synced_at ? new Date(account.last_synced_at).toISOString() : null,
     balance, equity, floating_pnl: Number((equity - balance).toFixed(2)),
-    starting_balance: Number(account.starting_balance),
-    net_profit: Number((balance - Number(account.starting_balance)).toFixed(2)),
     realized_pnl_today: Number(todaysClosed.reduce((total, trade) => total + Number(trade.net_profit || 0), 0).toFixed(2)),
     closed_trades_today: todaysClosed.length,
     open_positions: Number(account.positions_count || 0), recorded_trades: Number(account.trades_count || 0),
@@ -123,10 +121,6 @@ export async function getDashboardSummary(context: ToolContext): Promise<Record<
       balance: Number(account.current_balance), equity: Number(account.current_equity),
       connection_status: account.connection_status, last_synced_at: account.last_synced_at || null,
       open_positions: Number(account.positions_count || 0), recorded_trades: Number(account.trades_count || 0),
-      daily_drawdown: Number(account.prop_firm?.current_daily_drawdown || 0),
-      max_drawdown: Number(account.prop_firm?.current_max_drawdown || 0),
-      phase: account.prop_phase?.phase_name || null,
-      phase_progress_percent: Number(account.prop_phase?.progress_percentage || 0),
     })),
     selected_account: selectedAccount?.account_name || null,
     open_positions: positions,
