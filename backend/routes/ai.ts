@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from 'express';
-import { runNovaAssistant } from '../ai/agent.ts';
+import { createProvider, runNovaAssistant } from '../ai/agent.ts';
+import { matchSimpleNavigation, runNovaAgent, type HistoryItem } from '../ai/novaAgent.ts';
+import { listMemories, removeMemory } from '../ai/memory.ts';
 
 const router = Router();
 router.get('/status', (_req: Request, res: Response) => {
@@ -8,6 +10,27 @@ router.get('/status', (_req: Request, res: Response) => {
     : provider === 'gemini' && Boolean(process.env.GEMINI_API_KEY);
   const expectedKey = provider === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
   res.json({ success: true, data: { enabled, provider: enabled ? provider : null, expected_key: expectedKey } });
+});
+
+const TABS = ['overview', 'trade-journal', 'analytics', 'accounts', 'ai', 'finance', 'settings'];
+function parseHistory(raw: unknown): HistoryItem[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > 40) return null;
+  const out: HistoryItem[] = [];
+  for (const item of raw) {
+    if (!item || (item.role !== 'user' && item.role !== 'assistant') || typeof item.text !== 'string' || item.text.length > 4000) return null;
+    out.push({ role: item.role, text: item.text });
+  }
+  return out;
+}
+
+router.get('/memory', async (_req: Request, res: Response) => {
+  try { res.json({ success: true, data: await listMemories() }); }
+  catch (e) { res.status(500).json({ success: false, error: { code: 'MEMORY_FAILED', message: (e as Error).message } }); }
+});
+router.delete('/memory/:id', async (req: Request, res: Response) => {
+  try { (await removeMemory(req.params.id)) ? res.json({ success: true }) : res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Memory not found.' } }); }
+  catch (e) { res.status(500).json({ success: false, error: { code: 'MEMORY_FAILED', message: (e as Error).message } }); }
 });
 
 // Simple per-process spend guard: this is a single-owner app, so one shared window is enough.
@@ -22,6 +45,10 @@ router.post('/chat', async (req: Request, res: Response) => {
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
   const accountId = typeof req.body?.account_id === 'string' ? req.body.account_id : undefined;
   const stream = req.body?.stream === true;
+  const history = parseHistory(req.body?.history);
+  const activeTab = typeof req.body?.active_tab === 'string' && TABS.includes(req.body.active_tab) ? req.body.active_tab : undefined;
+  const mode: 'voice' | 'text' = req.body?.mode === 'voice' ? 'voice' : 'text';
+  if (!history) return res.status(400).json({ success: false, error: { code: 'INVALID_HISTORY', message: 'Conversation history is malformed.' } });
   if (!message || message.length > 2000) {
     return res.status(400).json({ success: false, error: { code: 'INVALID_MESSAGE', message: 'Enter a message of 1 to 2000 characters.' } });
   }
@@ -33,6 +60,14 @@ router.post('/chat', async (req: Request, res: Response) => {
   const sendEvent = (data: Record<string, unknown>) => {
     if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
+  // Routing: a bare navigation command is instant and needs no model; everything else goes to the reasoning agent.
+  const respond = async (onText?: (text: string) => void) => {
+    const nav = matchSimpleNavigation(message);
+    if (nav) return { response: `Opening ${nav.label}.`, toolCalls: [{ name: 'navigate_to_tab', success: true }], account: null, dashboard: null, navigation: nav };
+    const provider = createProvider();
+    if (provider.complete) return runNovaAgent({ message, history, accountId, activeTab, mode }, provider, onText);
+    return runNovaAssistant(message, { accountId }, undefined, onText);
+  };
   try {
     if (stream) {
       res.status(200);
@@ -42,7 +77,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
       let sentText = false;
-      const data = await runNovaAssistant(message, { accountId }, undefined, (text) => {
+      const data = await respond((text) => {
         sentText = true;
         sendEvent({ type: 'chunk', text });
       });
@@ -52,7 +87,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       return;
     }
 
-    const data = await runNovaAssistant(message, { accountId });
+    const data = await respond();
     res.json({ success: true, data });
   } catch (error) {
     const err = error as Error & { code?: string; status?: number | string; statusCode?: number | string; providerErrorType?: string; providerMessage?: string; providerStage?: string };
@@ -60,7 +95,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     const diagnostic = providerStatus.toUpperCase();
     const numericStatus = Number(providerStatus);
     let code = err.code || 'AI_REQUEST_FAILED';
-    if (!['AI_NOT_CONFIGURED', 'NO_ACCOUNT', 'ACCOUNT_SELECTION_REQUIRED', 'ACCOUNT_NOT_FOUND', 'LIVE_DATA_NOT_RETRIEVED', 'DASHBOARD_ACTION_NOT_RETRIEVED', 'AI_EMPTY_RESPONSE', 'TOOL_NOT_ALLOWED'].includes(code)) {
+    if (!['AI_NOT_CONFIGURED', 'NO_ACCOUNT', 'ACCOUNT_SELECTION_REQUIRED', 'ACCOUNT_NOT_FOUND', 'LIVE_DATA_NOT_RETRIEVED', 'DASHBOARD_ACTION_NOT_RETRIEVED', 'AI_EMPTY_RESPONSE', 'AI_LOOP_LIMIT', 'TOOL_NOT_ALLOWED'].includes(code)) {
       if (/401|UNAUTHENTICATED|API_KEY/.test(diagnostic) || /403|PERMISSION_DENIED/.test(diagnostic)) code = 'AI_PROVIDER_ACCESS';
       else if (/429|RESOURCE_EXHAUSTED|QUOTA/.test(diagnostic)) code = 'AI_PROVIDER_LIMIT';
       else if (/404|NOT_FOUND/.test(diagnostic)) code = 'AI_MODEL_UNAVAILABLE';
@@ -79,6 +114,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       DASHBOARD_ACTION_NOT_RETRIEVED: 'NOVA could not open that dashboard section. Try asking again.',
       AI_EMPTY_RESPONSE: 'The AI provider returned an empty answer. Try again.',
       TOOL_NOT_ALLOWED: 'NOVA rejected an unsupported tool request.',
+      AI_LOOP_LIMIT: 'NOVA took too many steps on that request. Try asking it more simply.',
       AI_PROVIDER_ACCESS: 'The configured AI provider rejected its API key or account access. Check the provider key and model access.',
       AI_PROVIDER_LIMIT: 'The AI provider’s quota or rate limit was reached. Check its API usage and billing limits.',
       AI_MODEL_UNAVAILABLE: 'The configured AI model is unavailable. Check the selected provider and model setting in Render.',

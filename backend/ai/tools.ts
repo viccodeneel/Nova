@@ -41,7 +41,8 @@ export async function getAccountInfo(context: ToolContext): Promise<AccountInfo>
   if (context.accountId && !account) throw Object.assign(new Error('Selected account not found.'), { code: 'ACCOUNT_NOT_FOUND' });
   if (!account) {
     const accounts = await getAccounts();
-    if (accounts.length !== 1) throw Object.assign(new Error('Select an account in NOVA first.'), { code: accounts.length ? 'ACCOUNT_SELECTION_REQUIRED' : 'NO_ACCOUNT' });
+    if (accounts.length === 0) throw Object.assign(new Error('No verified MT5 account is connected.'), { code: 'NO_ACCOUNT' });
+    if (accounts.length > 1) throw Object.assign(new Error('Several MT5 accounts are connected; the user needs to select one in NOVA first.'), { code: 'ACCOUNT_SELECTION_REQUIRED' });
     account = accounts[0];
   }
   const balance = Number(account.current_balance);

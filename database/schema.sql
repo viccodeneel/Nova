@@ -268,3 +268,14 @@ CREATE TABLE IF NOT EXISTS net_worth_snapshots (
     net_worth NUMERIC(18,2) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- NOVA long-term memory: small, explicit, user-owned notes (never raw chat logs)
+CREATE TABLE IF NOT EXISTS nova_memories (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kind VARCHAR(20) NOT NULL,
+    content VARCHAR(300) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMPTZ,
+    use_count INT NOT NULL DEFAULT 0
+);

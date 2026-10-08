@@ -27,12 +27,12 @@ export class ApiClient {
     return response;
   }
 
-  public static async askAi(message: string, accountId?: string, onChunk?: (text: string) => void): Promise<{ response: string; toolCalls: Array<{ name: string; success: boolean }>; account: { currency: string; connection_status: string; balance: number; equity: number; realized_pnl_today: number; open_positions: number; last_synced_at: string | null } | null; dashboard: Record<string, unknown> | null; navigation: { page: NavSection; label: string } | null }> {
+  public static async askAi(message: string, accountId?: string, onChunk?: (text: string) => void, context?: { history?: Array<{ role: 'user' | 'assistant'; text: string }>; activeTab?: string; mode?: 'voice' | 'text' }): Promise<{ response: string; toolCalls: Array<{ name: string; success: boolean }>; account: { currency: string; connection_status: string; balance: number; equity: number; realized_pnl_today: number; open_positions: number; last_synced_at: string | null } | null; dashboard: Record<string, unknown> | null; navigation: { page: NavSection; label: string } | null }> {
     const streaming = Boolean(onChunk);
     const res = await this.request(`${this.baseUrl}/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(streaming ? { Accept: 'text/event-stream' } : {}) },
-      body: JSON.stringify({ message, account_id: accountId, stream: streaming }),
+      body: JSON.stringify({ message, account_id: accountId, stream: streaming, history: context?.history, active_tab: context?.activeTab, mode: context?.mode }),
       signal: AbortSignal.timeout(60000),
     });
     if (!streaming || !res.ok || !res.headers.get('content-type')?.includes('text/event-stream')) {
@@ -114,6 +114,15 @@ export class ApiClient {
   public static getProfile(): Promise<any> { return this.profileCall('').then((d) => d.data); }
   public static updateProfile(patch: object): Promise<any> { return this.profileCall('', { method: 'PATCH', body: JSON.stringify(patch) }).then((d) => d.data); }
   public static changePassword(current: string, next: string): Promise<void> { return this.profileCall('/password', { method: 'POST', body: JSON.stringify({ current, next }) }).then(() => undefined); }
+  public static async listMemories(): Promise<Array<{ id: string; kind: string; content: string; created_at: string }>> {
+    const res = await this.request(`${this.baseUrl}/ai/memory`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`Could not load memories (HTTP ${res.status}).`);
+    return (await res.json()).data || [];
+  }
+  public static async deleteMemory(id: string): Promise<void> {
+    const res = await this.request(`${this.baseUrl}/ai/memory/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`Could not delete that memory (HTTP ${res.status}).`);
+  }
   public static async getFinanceItems(): Promise<any[]> { return (await this.finance('')).data; }
   public static addFinanceItem(item: object) { return this.finance('', { method: 'POST', body: JSON.stringify(item) }); }
   public static updateFinanceItem(id: string, value: number) { return this.finance(`/${id}`, { method: 'PATCH', body: JSON.stringify({ value }) }); }

@@ -38,7 +38,7 @@ const instructions = [
   'For stale account data, say so and mention the last sync time when available. For general questions, distinguish general information from live account analysis.',
 ].join(' ');
 
-function createProvider(): AssistantProvider {
+export function createProvider(): AssistantProvider {
   const selectedProvider = (process.env.NOVA_AI_PROVIDER || 'anthropic').trim().toLowerCase();
   if (selectedProvider === 'anthropic') {
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -102,7 +102,7 @@ function isTransientProviderError(error: unknown): boolean {
     || /UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|ETIMEDOUT|ECONNRESET|ECONNREFUSED|fetch failed|network error/i.test(`${err.code || ''} ${err.message || ''}`);
 }
 
-async function withTransientRetry<T>(operation: () => Promise<T>, hasStreamedText: () => boolean, onRetry: () => void): Promise<T> {
+export async function withTransientRetry<T>(operation: () => Promise<T>, hasStreamedText: () => boolean, onRetry: () => void): Promise<T> {
   const delays = [350, 1000];
   for (let attempt = 0; ; attempt += 1) {
     try { return await operation(); }
