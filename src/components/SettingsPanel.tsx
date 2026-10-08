@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { loadPrefs, makeUtterance, pickDefaultVoice, savePrefs, whenVoicesReady } from '../voice/voicePrefs.ts';
 import { ApiClient } from '../services/apiClient.ts';
 import type { PropAccount } from '../data/terminalData.ts';
 
@@ -32,6 +33,57 @@ interface Props {
   onDeleteAccount: (id: string) => void | Promise<void>; onConnect: () => void; onSignOut?: () => void;
   wake?: { supported: boolean; enabled: boolean; status: string; onChange: (on: boolean) => void };
 }
+
+const VoiceCard: React.FC = () => {
+  const supported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [prefs, setPrefs] = useState(loadPrefs);
+  useEffect(() => { if (supported) void whenVoicesReady().then(setVoices); }, [supported]);
+  const update = (next: typeof prefs) => { setPrefs(next); savePrefs(next); };
+  const automatic = pickDefaultVoice(voices);
+  const preview = () => {
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(makeUtterance('Hello, this is how I sound. Tell me what you need.', prefs));
+  };
+  if (!supported) return <Card title="NOVA’s voice"><p className="text-sm text-slate-500">This browser can’t speak aloud. Try a recent Chrome or Edge.</p></Card>;
+  return (
+    <Card title="NOVA’s voice" hint="Browsers differ in their default voice, so pick one for NOVA and it will keep it. The list depends on your browser and device.">
+      <select aria-label="Voice" value={prefs.voiceURI ?? ''} onChange={(e) => update({ ...prefs, voiceURI: e.target.value || null })} className={inputCls}>
+        <option value="">Automatic{automatic ? ` (${automatic.name})` : ''}</option>
+        {voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name} · {v.lang}{v.localService ? '' : ' · online'}</option>)}
+      </select>
+      <label className="mt-4 flex items-center gap-3 text-sm text-slate-300">
+        Speed
+        <input type="range" min="0.7" max="1.4" step="0.05" value={prefs.rate} onChange={(e) => update({ ...prefs, rate: Number(e.target.value) })} className="flex-1 accent-cyan-400" aria-label="Speaking speed" />
+        <span className="w-10 text-right tabular-nums text-slate-400">{prefs.rate.toFixed(2)}×</span>
+      </label>
+      <button type="button" onClick={preview} className="mt-4 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-white transition hover:border-cyan-400">Preview voice</button>
+    </Card>
+  );
+};
+
+const MemoryCard: React.FC = () => {
+  const [items, setItems] = useState<Array<{ id: string; kind: string; content: string }> | null>(null);
+  const [err, setErr] = useState('');
+  const load = () => ApiClient.listMemories().then((m) => { setItems(m); setErr(''); }).catch((e) => setErr((e as Error).message));
+  useEffect(() => { void load(); }, []);
+  return (
+    <Card title="What NOVA remembers" hint="Only things you explicitly ask it to remember, like “remember that I only trade gold in the London session”. You can remove anything here.">
+      {err && <p role="alert" className="text-sm text-rose-400">{err}</p>}
+      {items === null && !err && <p className="text-sm text-slate-500">Loading…</p>}
+      {items?.length === 0 && <p className="text-sm text-slate-500">Nothing stored yet.</p>}
+      <ul className="divide-y divide-white/5">
+        {items?.map((m) => (
+          <li key={m.id} className="flex items-start gap-3 py-2.5">
+            <span className="mt-0.5 rounded-md bg-white/5 px-2 py-0.5 font-label-tech text-[10px] uppercase text-slate-400">{m.kind}</span>
+            <span className="flex-1 text-sm text-slate-200">{m.content}</span>
+            <button type="button" aria-label="Forget this" onClick={() => void ApiClient.deleteMemory(m.id).then(load).catch((e) => setErr((e as Error).message))} className="text-slate-600 transition hover:text-rose-400"><span className="material-symbols-outlined text-[18px]">delete</span></button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+};
 
 export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accounts, onDeleteAccount, onConnect, onSignOut, wake }) => {
   const [name, setName] = useState(profile.display_name);
@@ -103,6 +155,9 @@ export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accou
           </p>
         </Card>
       )}
+
+      <VoiceCard />
+      <MemoryCard />
 
       <Card title="Password" hint="At least 12 characters. Other signed-in devices stay signed in until their session expires (12 hours).">
         <form onSubmit={changePw} className="flex flex-col gap-3">

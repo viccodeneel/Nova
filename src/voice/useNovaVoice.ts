@@ -3,6 +3,7 @@ import { ApiClient } from '../services/apiClient.ts';
 import { createSpeechRecognition, isSpeechRecognitionSupported } from '../services/speechRecognition.ts';
 import type { SpeechRecognitionErrorEventLike } from '../services/speechRecognition.ts';
 import type { NavSection } from '../data/terminalData.ts';
+import { makeUtterance, splitForSpeech } from './voicePrefs.ts';
 
 type AccountSnapshot = NonNullable<Awaited<ReturnType<typeof ApiClient.askAi>>['account']>;
 export type ChatMessage = { role: 'user' | 'nova'; text: string; account?: AccountSnapshot };
@@ -32,7 +33,7 @@ const speechErrorMessage = (event: SpeechRecognitionErrorEventLike): string => {
   }
 };
 
-interface Options { enabled: boolean; onNavigate: (page: NavSection) => void; getAccountId: () => string | undefined }
+interface Options { enabled: boolean; onNavigate: (page: NavSection) => void; getAccountId: () => string | undefined; getActiveTab?: () => string }
 
 /**
  * App-level NOVA engine: chat, voice conversation, and wake word. It lives above the screens, so
@@ -57,6 +58,8 @@ export function useNovaVoice(options: Options) {
   const [wakeStatus, setWakeStatus] = useState<WakeStatus>('off');
 
   const wakeEnabledRef = useRef(wakeEnabled);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
   const busyRef = useRef(false);
   const queuedRef = useRef<string | null>(null);
   const voiceConversationRef = useRef(false);
@@ -186,36 +189,49 @@ export function useNovaVoice(options: Options) {
     clearSpeechTimers();
     window.speechSynthesis.cancel();
     const id = ++speechIdRef.current;
-    spokenTextRef.current = text;
-    spokenCharIndexRef.current = 0;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = navigator.language || 'en-US';
+    const chunks = splitForSpeech(text);
     const done = (feedback?: string) => { if (id === speechIdRef.current) finishVoiceTurn(feedback); };
-    utterance.onstart = () => {
+    if (!chunks.length) { done(); return; }
+    spokenTextRef.current = chunks.join(' ');
+    spokenCharIndexRef.current = 0;
+    const offsets: number[] = [];
+    chunks.reduce((acc, chunk) => { offsets.push(acc); return acc + chunk.length + 1; }, 0);
+    let next = 0;
+    // Long replies are spoken sentence by sentence: some browsers cut off a single long utterance.
+    const speakNext = () => {
       if (id !== speechIdRef.current) return;
-      clearTimer('speechStart');
-      voiceSpeakingRef.current = true;
-      setVoiceSpeaking(true);
-      setVoiceFeedback('NOVA is speaking — speak over me to interrupt.');
-      if (!recognitionRef.current) toggleListening(true);
+      if (next >= chunks.length) { done(); return; }
+      const n = next;
+      next += 1;
+      const utterance = makeUtterance(chunks[n]);
+      utterance.onstart = () => {
+        if (id !== speechIdRef.current) return;
+        clearTimer('speechStart');
+        if (voiceSpeakingRef.current) return;
+        voiceSpeakingRef.current = true;
+        setVoiceSpeaking(true);
+        setVoiceFeedback('NOVA is speaking — speak over me to interrupt.');
+        if (!recognitionRef.current) toggleListening(true);
+      };
+      utterance.onboundary = (event) => {
+        if (id !== speechIdRef.current) return;
+        spokenCharIndexRef.current = offsets[n] + event.charIndex;
+        const word = chunks[n].slice(event.charIndex).match(/^[A-Za-z0-9']+/)?.[0] || '';
+        setVoicePulse(Math.min(0.14, 0.04 + word.length * 0.009));
+        setTimer('pulse', () => setVoicePulse(0), 170);
+      };
+      utterance.onend = speakNext;
+      utterance.onerror = () => done();
+      window.speechSynthesis.speak(utterance);
     };
-    utterance.onboundary = (event) => {
-      if (id !== speechIdRef.current) return;
-      spokenCharIndexRef.current = event.charIndex;
-      const word = text.slice(event.charIndex).match(/^[A-Za-z0-9']+/)?.[0] || '';
-      setVoicePulse(Math.min(0.14, 0.04 + word.length * 0.009));
-      setTimer('pulse', () => setVoicePulse(0), 170);
-    };
-    utterance.onend = () => done();
-    utterance.onerror = () => done();
     // Browsers do not always fire speech events. These watchdogs keep the conversation moving regardless.
     setTimer('speechStart', () => {
       if (id !== speechIdRef.current || voiceSpeakingRef.current) return;
       window.speechSynthesis.cancel();
       done('Voice playback was blocked by the browser. Click anywhere on the page once, then try again.');
     }, 2000);
-    setTimer('speechEnd', () => { if (id !== speechIdRef.current) return; window.speechSynthesis.cancel(); done(); }, Math.max(5000, text.length * 95 + 3500));
-    window.speechSynthesis.speak(utterance);
+    setTimer('speechEnd', () => { if (id !== speechIdRef.current) return; window.speechSynthesis.cancel(); done(); }, Math.max(5000, spokenTextRef.current.length * 95 + 3500));
+    speakNext();
   }
 
   // ---------- speech in ----------
@@ -307,7 +323,7 @@ export function useNovaVoice(options: Options) {
     if (!text) { waitingForReplyRef.current = false; return; }
     if (speak && isEndPhrase(text)) {
       stopVoiceConversation('Standing by. Say “Hey NOVA” when you need me.');
-      if (speechOutputSupported) window.speechSynthesis.speak(new SpeechSynthesisUtterance('Standing by.'));
+      if (speechOutputSupported) window.speechSynthesis.speak(makeUtterance('Standing by.'));
       return;
     }
     if (busyRef.current) {
@@ -316,6 +332,7 @@ export function useNovaVoice(options: Options) {
       return;
     }
     clearIdle();
+    const history = messagesRef.current.filter((m) => m.text.trim()).slice(-14).map((m) => ({ role: m.role === 'nova' ? 'assistant' as const : 'user' as const, text: m.text }));
     setMessages((old) => [...old, { role: 'user', text }, ...(!speak ? [{ role: 'nova' as const, text: '' }] : [])]);
     setInput('');
     setError('');
@@ -329,7 +346,7 @@ export function useNovaVoice(options: Options) {
       });
     };
     try {
-      const result = await ApiClient.askAi(text, optsRef.current.getAccountId(), onChunk);
+      const result = await ApiClient.askAi(text, optsRef.current.getAccountId(), onChunk, { history, activeTab: optsRef.current.getActiveTab?.(), mode: speak ? 'voice' : 'text' });
       setMessages((old) => {
         const entry = { role: 'nova' as const, text: result.response, account: result.account || undefined };
         if (speak) return [...old, entry];
