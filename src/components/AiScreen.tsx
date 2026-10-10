@@ -21,12 +21,13 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice
   const [aiReady, setAiReady] = useState<boolean | null>(null);
   const [aiUnreachable, setAiUnreachable] = useState(false);
   const [aiKeyName, setAiKeyName] = useState('ANTHROPIC_API_KEY');
+  const [webSearch, setWebSearch] = useState<boolean | null>(null);
   useEffect(() => {
     // Doubles as a backend warm-up: a sleeping host gets a few chances before we report it unreachable.
     let live = true;
     const check = (attempt: number): void => {
       ApiClient.getAiStatus()
-        .then((v) => { if (!live) return; setAiUnreachable(false); setAiReady(v.enabled); if (v.expected_key) setAiKeyName(v.expected_key); })
+        .then((v) => { if (!live) return; setAiUnreachable(false); setAiReady(v.enabled); if (v.expected_key) setAiKeyName(v.expected_key); setWebSearch(Boolean(v.web_search)); })
         .catch(() => { if (!live) return; if (attempt < 2) window.setTimeout(() => check(attempt + 1), 2500); else { setAiUnreachable(true); setAiReady(null); } });
     };
     check(0);
@@ -38,6 +39,7 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice
     ['Reasoning core', aiUnreachable ? 'BACKEND UNREACHABLE' : aiReady === null ? 'CHECKING' : aiReady ? 'CONFIGURED' : 'NOT CONFIGURED', aiUnreachable ? 'warn' : aiReady === true],
     ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
     ['Wake word', WAKE_LABEL[nova.wakeStatus], nova.wakeStatus === 'listening' || nova.wakeStatus === 'paused' ? true : false],
+    ['Web search', webSearch === null ? 'CHECKING' : webSearch ? 'ON' : 'NOT CONFIGURED', webSearch === true],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
   const submit = async (event: React.FormEvent) => {
