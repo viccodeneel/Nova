@@ -23,5 +23,15 @@ services:
         generateValue: true
       - key: LIVEKIT_SUMMARY_TOKEN
         sync: false
+      - key: LIVEKIT_VOICE_ENABLED
+        value: "false"
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: LIVEKIT_AGENT_NAME
+        sync: false
       - key: CORS_ORIGIN
         value: https://viccodeneel.github.io

@@ -3,6 +3,7 @@ import { Mic, MicOff } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ApiClient } from '../services/apiClient.ts';
 import type { NovaVoice } from '../voice/useNovaVoice.ts';
+import type { LiveKitVoice } from '../voice/useLiveKitVoice.ts';
 
 export type LinkState = 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'NONE';
 
@@ -11,7 +12,7 @@ const WAKE_LABEL = { off: 'OFF', listening: 'LISTENING', paused: 'LISTENING', bl
 
 // Every status row below reflects real state. The conversation engine lives in useNovaVoice (app level),
 // so voice sessions keep running when you switch tabs.
-export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice }> = ({ mt5, name, nova }) => {
+export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice; livekit: LiveKitVoice }> = ({ mt5, name, nova, livekit }) => {
   const h = new Date().getHours();
   const {
     messages, input, setInput, busy, error, listening, voiceFeedback, voiceConversation, voiceSpeaking, voicePulse,
@@ -38,7 +39,8 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice
     ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
     ['Reasoning core', aiUnreachable ? 'BACKEND UNREACHABLE' : aiReady === null ? 'CHECKING' : aiReady ? 'CONFIGURED' : 'NOT CONFIGURED', aiUnreachable ? 'warn' : aiReady === true],
     ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
-    ['Wake word', WAKE_LABEL[nova.wakeStatus], nova.wakeStatus === 'listening' || nova.wakeStatus === 'paused' ? true : false],
+    ['LiveKit voice', livekit.phase === 'connecting' ? 'CONNECTING' : livekit.phase === 'speaking' ? 'SPEAKING' : livekit.active ? 'LISTENING' : livekit.phase === 'error' ? 'DISCONNECTED' : livekit.phase === 'disabled' ? 'NOT CONFIGURED' : livekit.phase === 'checking' ? 'CHECKING' : 'IDLE', livekit.active ? true : livekit.phase === 'error' ? 'warn' : livekit.available],
+    ['Wake word', livekit.active ? 'PAUSED (LIVEKIT)' : WAKE_LABEL[nova.wakeStatus], !livekit.active && (nova.wakeStatus === 'listening' || nova.wakeStatus === 'paused') ? true : false],
     ['Web search', webSearch === null ? 'CHECKING' : webSearch ? 'ON' : 'NOT CONFIGURED', webSearch === true],
     ['Market data feed', 'NOT CONNECTED', false],
   ];
@@ -180,6 +182,14 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice
           ))}
         </ul>
         {aiReady === false && <p className="mt-4 text-xs text-slate-500">Set {aiKeyName} in the backend environment to enable text reasoning.</p>}
+        <div className="mt-5 rounded-xl border border-cyan-400/10 bg-cyan-400/[0.03] p-3">
+          <p className="font-label-tech text-[10px] uppercase tracking-[0.2em] text-cyan-300">LiveKit voice</p>
+          <p role="status" aria-live="polite" className="mt-2 text-xs leading-relaxed text-slate-400">{livekit.error || livekit.message}</p>
+          {livekit.audioNeedsActivation && <button type="button" onClick={() => void livekit.enableAudio()} className="mt-3 w-full rounded-lg border border-amber-300/20 px-3 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/10">Enable NOVA audio</button>}
+          {livekit.active
+            ? <button type="button" onClick={() => void livekit.disconnect()} className="mt-3 w-full rounded-lg border border-rose-400/20 px-3 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-400/10">Disconnect LiveKit voice</button>
+            : <button type="button" disabled={!livekit.available || livekit.phase === 'connecting'} onClick={() => void livekit.connect()} className="mt-3 w-full rounded-lg border border-cyan-400/20 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-40">{livekit.phase === 'connecting' ? 'Connecting…' : livekit.phase === 'error' ? 'Try LiveKit again' : 'Connect LiveKit voice'}</button>}
+        </div>
       </aside>
     </div>
   );

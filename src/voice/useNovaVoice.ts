@@ -54,10 +54,12 @@ export function useNovaVoice(options: Options) {
   const [voiceSpeaking, setVoiceSpeaking] = useState(false);
   const [voicePulse, setVoicePulse] = useState(0);
   const [dockOpen, setDockOpen] = useState(false);
+  const [voiceSuspended, setVoiceSuspended] = useState(false);
   const [wakeEnabled, setWakeEnabledState] = useState(() => { try { return localStorage.getItem(WAKE_KEY) === '1'; } catch { return false; } });
   const [wakeStatus, setWakeStatus] = useState<WakeStatus>('off');
 
   const wakeEnabledRef = useRef(wakeEnabled);
+  const voiceSuspendedRef = useRef(false);
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
   const busyRef = useRef(false);
@@ -99,7 +101,7 @@ export function useNovaVoice(options: Options) {
   const resumeWake = () => setTimer('wakeResume', startWake, 700);
 
   function startWake() {
-    if (!optsRef.current.enabled || !wakeEnabledRef.current || voiceConversationRef.current || wakeRecRef.current || recognitionRef.current) return;
+    if (!optsRef.current.enabled || !wakeEnabledRef.current || voiceSuspendedRef.current || voiceConversationRef.current || wakeRecRef.current || recognitionRef.current) return;
     if (typeof document !== 'undefined' && document.hidden) return;
     const rec = createSpeechRecognition();
     if (!rec) { setWakeStatus('unsupported'); return; }
@@ -247,6 +249,7 @@ export function useNovaVoice(options: Options) {
   };
 
   function toggleListening(monitorNovaSpeech = false) {
+    if (voiceSuspendedRef.current) return;
     const active = recognitionRef.current;
     if (active) { active.stop(); return; }
     stopWakeRecognition();
@@ -388,11 +391,14 @@ export function useNovaVoice(options: Options) {
     setListening(false);
     if (speechOutputSupported) window.speechSynthesis.cancel();
     setVoiceFeedback(feedback);
-    scheduleDockClose();
-    resumeWake();
+    if (!voiceSuspendedRef.current) {
+      scheduleDockClose();
+      resumeWake();
+    }
   }
 
   function startVoiceConversation() {
+    if (voiceSuspendedRef.current) return;
     if (!voiceConversationSupported) { setVoiceFeedback('Voice conversations need speech recognition and speech playback. Try the latest Chrome or Edge.'); setDockOpen(true); return; }
     stopWakeRecognition();
     if (recognitionRef.current) { try { recognitionRef.current.abort(); } catch { /* already stopped */ } recognitionRef.current = null; setListening(false); }
@@ -407,6 +413,7 @@ export function useNovaVoice(options: Options) {
   }
 
   function handleOrbClick() {
+    if (voiceSuspendedRef.current) return;
     if (!voiceConversationRef.current) { startVoiceConversation(); return; }
     if (voiceSpeakingRef.current) {
       speechIdRef.current += 1;
@@ -430,16 +437,48 @@ export function useNovaVoice(options: Options) {
     setDockOpen(false);
   };
 
+  function suspendBrowserVoice() {
+    voiceSuspendedRef.current = true;
+    setVoiceSuspended(true);
+    clearTimer('wakeResume');
+    clearTimer('wakeRestart');
+    clearTimer('idle');
+    clearSpeechTimers();
+    speechIdRef.current += 1;
+    voiceConversationRef.current = false;
+    wakeSessionRef.current = false;
+    voiceSpeakingRef.current = false;
+    waitingForReplyRef.current = false;
+    queuedRef.current = null;
+    stopWakeRecognition();
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    try { recognition?.abort(); } catch { /* already stopped */ }
+    setListening(false);
+    setVoiceConversation(false);
+    setVoiceSpeaking(false);
+    setVoicePulse(0);
+    if (speechOutputSupported) window.speechSynthesis.cancel();
+    setVoiceFeedback('LiveKit voice is active. Disconnect it to use browser voice.');
+  }
+
+  function resumeBrowserVoice() {
+    voiceSuspendedRef.current = false;
+    setVoiceSuspended(false);
+    setVoiceFeedback('Browser voice is available as a fallback.');
+    if (optsRef.current.enabled && wakeEnabledRef.current) resumeWake();
+  }
+
   // ---------- lifecycle ----------
   useEffect(() => { conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, busy]);
   useEffect(() => {
     optsRef.current = { ...optsRef.current, enabled: options.enabled };
-    if (options.enabled && wakeEnabled) startWake();
+    if (options.enabled && wakeEnabled && !voiceSuspendedRef.current) startWake();
     else { stopWakeRecognition(); setWakeStatus((prev) => (prev === 'blocked' ? prev : 'off')); }
     const onVisible = () => { if (!document.hidden) startWake(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [options.enabled, wakeEnabled]);
+  }, [options.enabled, wakeEnabled, voiceSuspended]);
   useEffect(() => () => {
     voiceConversationRef.current = false;
     optsRef.current = { ...optsRef.current, enabled: false };
@@ -449,11 +488,11 @@ export function useNovaVoice(options: Options) {
   }, []);
 
   return {
-    messages, input, setInput, busy, error, listening, voiceFeedback, voiceConversation, voiceSpeaking, voicePulse,
+    messages, input, setInput, busy, error, listening, voiceFeedback, voiceConversation, voiceSpeaking, voicePulse, voiceSuspended,
     dockOpen, openDock, closeDock, wakeEnabled, wakeStatus, setWakeEnabled, wakeSupported: speechSupported,
     speechSupported, voiceConversationSupported, conversationEndRef,
     sendText: (text: string) => submitMessage(text, false),
-    toggleListening, handleOrbClick, startVoiceConversation, stopVoiceConversation,
+    toggleListening, handleOrbClick, startVoiceConversation, stopVoiceConversation, suspendBrowserVoice, resumeBrowserVoice,
   };
 }
 

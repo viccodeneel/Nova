@@ -21,9 +21,10 @@ import tradesRouter from './backend/routes/trades.ts';
 import connectorRouter from './backend/routes/connector.ts';
 import profileRouter from './backend/routes/profile.ts';
 import financeRouter from './backend/routes/finance.ts';
-import authRouter, { requireAuth } from './backend/routes/auth.ts';
+import authRouter, { requireAuth, requireStrictAuth } from './backend/routes/auth.ts';
 import aiRouter from './backend/routes/ai.ts';
 import { createLivekitRouter } from './backend/routes/livekit.ts';
+import { createLivekitVoiceRouter } from './backend/routes/livekitVoice.ts';
 import { createSessionSummaryStore } from './backend/services/livekitSummaryStore.ts';
 
 async function startServer() {
@@ -82,6 +83,8 @@ async function startServer() {
   }, connectorRouter);
   // LiveKit Agent Builder end-of-call summaries: NOT behind requireAuth; authenticated by its own LIVEKIT_SUMMARY_TOKEN.
   app.use('/api/livekit', createLivekitRouter({ store: createSessionSummaryStore() }));
+  // Voice participant tokens are a separate credential path and always require a signed dashboard session.
+  app.use('/api/livekit/voice', requireStrictAuth, createLivekitVoiceRouter());
 
   // Health endpoint
   app.get('/api/health', (req, res) => {

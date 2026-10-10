@@ -21,6 +21,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ConnectAccountScreen } from './components/ConnectAccountScreen';
 import { AiScreen, type LinkState } from './components/AiScreen';
 import { useNovaVoice } from './voice/useNovaVoice';
+import { useLiveKitVoice } from './voice/useLiveKitVoice';
 import { NovaOrbDock } from './components/NovaOrbDock';
 import { NetWorthScreen } from './components/NetWorthScreen';
 import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
@@ -131,6 +132,7 @@ export default function App() {
   const handleGoalChange = async (goal: number | null) => setProfile(await ApiClient.updateProfile({ networth_goal: goal }));
   // One NOVA engine for the whole app: conversations survive tab changes and the wake word works anywhere.
   const nova = useNovaVoice({ enabled: Boolean(authToken), onNavigate: setActiveNav, getAccountId: () => activeAccountId, getActiveTab: () => activeNav });
+  const livekitVoice = useLiveKitVoice({ authenticated: Boolean(authToken), onConnecting: nova.suspendBrowserVoice, onDisconnected: nova.resumeBrowserVoice });
   const wakeProps = { supported: nova.wakeSupported, enabled: nova.wakeEnabled, status: nova.wakeStatus, onChange: nova.setWakeEnabled };
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
@@ -642,7 +644,7 @@ export default function App() {
         <main className="relative mx-auto w-full max-w-6xl p-5 sm:p-8">
           <div key={activeNav} className="nova-enter">
             {activeNav === 'accounts' ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
-              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} nova={nova} />
+              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} nova={nova} livekit={livekitVoice} />
               : activeNav === 'finance' ? <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />
               : activeNav === 'settings' ? <SettingsPanel wake={wakeProps} profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />
               : activeNav === 'analytics' ? <AnalyticsScreen trades={trades} />
@@ -657,7 +659,7 @@ export default function App() {
           </div>
         </main>
         {toast}
-        <NovaOrbDock nova={nova} activeNav={activeNav} />
+        <NovaOrbDock nova={nova} activeNav={activeNav} livekit={livekitVoice} />
       </div>
     );
   }
@@ -1047,7 +1049,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} nova={nova} />}
+          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} nova={nova} livekit={livekitVoice} />}
           {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
           {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
 
@@ -1100,7 +1102,7 @@ export default function App() {
       </nav>
 
       {toast}
-      <NovaOrbDock nova={nova} activeNav={activeNav} />
+      <NovaOrbDock nova={nova} activeNav={activeNav} livekit={livekitVoice} />
 
       {/* MT5 Statement File / Past Deals Importer */}
       <Mt5ImportModal

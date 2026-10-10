@@ -20,6 +20,21 @@ The blueprint creates one Node web service. It uses the existing Supabase Postgr
 
 The free Render web service may sleep after 15 minutes without traffic; its next request can take about a minute to wake. Use a paid always-on plan if that delay is unsuitable. See [Render's free service limits](https://render.com/docs/free).
 
+## Enable dashboard LiveKit voice (optional)
+
+NOVA's global orb can connect to a deployed LiveKit Agent Builder agent. The voice room is created only after the user selects **Connect LiveKit voice**. NOVA issues a short-lived microphone-only participant token after validating the signed dashboard session, and the token dispatches the configured agent into that unique room.
+
+In Render → `nova-backend` → **Environment**, configure these server-only values:
+
+- `LIVEKIT_URL`: the LiveKit project WebSocket URL (`wss://...`), available in LiveKit Cloud project settings.
+- `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`: the project's server credentials. Keep them on the backend; never add them to frontend build variables.
+- `LIVEKIT_AGENT_NAME`: the exact Agent Builder agent name used for explicit dispatch.
+- `LIVEKIT_VOICE_ENABLED`: set to `true` only after the values above are present and the agent is deployed.
+
+The Agent Builder preview is not a production deployment for dashboard rooms. Deploy the agent in LiveKit Cloud, and confirm its exact **Agent name** in Agent Builder. The token targets the production deployment by default; no agent dispatch URL is configured in NOVA. A fresh unique room is created on each connect, so LiveKit's token-based dispatch runs when the dashboard participant creates that room. NOVA's existing `LIVEKIT_SUMMARY_TOKEN` remains exclusively for completed-session summary ingestion.
+
+The browser microphone permission prompt appears after the user connects. The existing browser-native voice and wake phrase remain available as a fallback and are paused while LiveKit is connecting or connected. This phase does not send LiveKit speech to NOVA's dashboard AI tools; that requires the later voice-to-tools bridge.
+
 ## Point GitHub Pages at the API
 
 1. In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables**.

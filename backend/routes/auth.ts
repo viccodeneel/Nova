@@ -85,6 +85,11 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     next();
     return;
   }
+  requireStrictAuth(req, res, next);
+}
+
+/** Always validate a dashboard session, including in local development. Use for credential-issuing routes. */
+export function requireStrictAuth(req: Request, res: Response, next: NextFunction): void {
   const authorization = req.headers.authorization || '';
   const token = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
   if (authSecret().length < 32 || !token || !isValidToken(token)) {

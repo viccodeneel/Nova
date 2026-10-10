@@ -12,6 +12,18 @@ export interface ApiSyncResult {
   error?: string;
 }
 
+export interface LiveKitVoiceStatus {
+  enabled: boolean;
+  ready: boolean;
+  message: string;
+}
+
+export interface LiveKitVoiceCredentials {
+  serverUrl: string;
+  roomName: string;
+  participantToken: string;
+}
+
 export class ApiClient {
   private static baseUrl = `${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')}/api`;
 
@@ -76,6 +88,25 @@ export class ApiClient {
     const res = await this.request(`${this.baseUrl}/ai/status`, { signal: AbortSignal.timeout(25000) });
     if (!res.ok) throw new Error('Could not read NOVA AI status.');
     return (await res.json()).data;
+  }
+
+  public static async getLiveKitVoiceStatus(): Promise<LiveKitVoiceStatus> {
+    const res = await this.request(`${this.baseUrl}/livekit/voice/status`, { signal: AbortSignal.timeout(10000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error('Could not read LiveKit voice status.');
+    return data.data as LiveKitVoiceStatus;
+  }
+
+  public static async getLiveKitVoiceToken(): Promise<LiveKitVoiceCredentials> {
+    const res = await this.request(`${this.baseUrl}/livekit/voice/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error('LiveKit voice token request failed.');
+    return data.data as LiveKitVoiceCredentials;
   }
 
   public static async login(password: string): Promise<string> {
