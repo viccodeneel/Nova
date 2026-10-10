@@ -24,7 +24,7 @@ services:
       - key: LIVEKIT_SUMMARY_TOKEN
         sync: false
       - key: LIVEKIT_VOICE_ENABLED
-        value: "false"
+        value: "true"
       - key: LIVEKIT_URL
         sync: false
       - key: LIVEKIT_API_KEY
