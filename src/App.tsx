@@ -132,7 +132,16 @@ export default function App() {
   const handleGoalChange = async (goal: number | null) => setProfile(await ApiClient.updateProfile({ networth_goal: goal }));
   // One NOVA engine for the whole app: conversations survive tab changes and the wake word works anywhere.
   const nova = useNovaVoice({ enabled: Boolean(authToken), onNavigate: setActiveNav, getAccountId: () => activeAccountId, getActiveTab: () => activeNav });
-  const livekitVoice = useLiveKitVoice({ authenticated: Boolean(authToken), onConnecting: nova.suspendBrowserVoice, onDisconnected: nova.resumeBrowserVoice });
+  const livekitVoice = useLiveKitVoice({
+    authenticated: Boolean(authToken),
+    accountId: activeAccountId || undefined,
+    onConnecting: nova.suspendBrowserVoice,
+    onDisconnected: nova.resumeBrowserVoice,
+    onNavigate: async (page) => {
+      setActiveNav(page);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    },
+  });
   const wakeProps = { supported: nova.wakeSupported, enabled: nova.wakeEnabled, status: nova.wakeStatus, onChange: nova.setWakeEnabled };
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 

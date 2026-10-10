@@ -25,6 +25,7 @@ import authRouter, { requireAuth, requireStrictAuth } from './backend/routes/aut
 import aiRouter from './backend/routes/ai.ts';
 import { createLivekitRouter } from './backend/routes/livekit.ts';
 import { createLivekitVoiceRouter } from './backend/routes/livekitVoice.ts';
+import { createLivekitVoiceToolRouter } from './backend/routes/livekitVoiceTools.ts';
 import { createSessionSummaryStore } from './backend/services/livekitSummaryStore.ts';
 
 async function startServer() {
@@ -83,8 +84,13 @@ async function startServer() {
   }, connectorRouter);
   // LiveKit Agent Builder end-of-call summaries: NOT behind requireAuth; authenticated by its own LIVEKIT_SUMMARY_TOKEN.
   app.use('/api/livekit', createLivekitRouter({ store: createSessionSummaryStore() }));
-  // Voice participant tokens are a separate credential path and always require a signed dashboard session.
-  app.use('/api/livekit/voice', requireStrictAuth, createLivekitVoiceRouter());
+  // Agent tool calls use a short-lived room-scoped credential; the agent credential
+  // refresh endpoint separately authenticates its server-to-server bridge secret.
+  app.use('/api/livekit/voice/agent/tools', createLivekitVoiceToolRouter());
+  app.use('/api/livekit/voice', (req, res, next) => {
+    if (req.path === '/agent/credentials') return next();
+    return requireStrictAuth(req, res, next);
+  }, createLivekitVoiceRouter());
 
   // Health endpoint
   app.get('/api/health', (req, res) => {

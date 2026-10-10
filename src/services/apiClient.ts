@@ -21,6 +21,7 @@ export interface LiveKitVoiceStatus {
 export interface LiveKitVoiceCredentials {
   serverUrl: string;
   roomName: string;
+  participantIdentity: string;
   participantToken: string;
 }
 
@@ -97,16 +98,25 @@ export class ApiClient {
     return data.data as LiveKitVoiceStatus;
   }
 
-  public static async getLiveKitVoiceToken(): Promise<LiveKitVoiceCredentials> {
+  public static async getLiveKitVoiceToken(accountId?: string): Promise<LiveKitVoiceCredentials> {
     const res = await this.request(`${this.baseUrl}/livekit/voice/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify({ accountId }),
       signal: AbortSignal.timeout(15000),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) throw new Error('LiveKit voice token request failed.');
     return data.data as LiveKitVoiceCredentials;
+  }
+
+  public static async startLiveKitVoiceAgent(roomName: string, participantIdentity: string): Promise<void> {
+    const res = await this.request(`${this.baseUrl}/livekit/voice/start-agent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomName, participantIdentity }), signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.error || 'The NOVA voice agent could not join this session.');
   }
 
   public static async login(password: string): Promise<string> {

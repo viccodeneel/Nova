@@ -33,5 +33,9 @@ services:
         sync: false
       - key: LIVEKIT_AGENT_NAME
         sync: false
+      - key: LIVEKIT_TOOL_TOKEN_SECRET
+        generateValue: true
+      - key: LIVEKIT_AGENT_BRIDGE_SECRET
+        sync: false
       - key: CORS_ORIGIN
         value: https://viccodeneel.github.io

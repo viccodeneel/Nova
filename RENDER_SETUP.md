@@ -22,18 +22,20 @@ The free Render web service may sleep after 15 minutes without traffic; its next
 
 ## Enable dashboard LiveKit voice (optional)
 
-NOVA's global orb can connect to a deployed LiveKit Agent Builder agent. The voice room is created only after the user selects **Connect LiveKit voice**. NOVA issues a short-lived microphone-only participant token after validating the signed dashboard session, and the token dispatches the configured agent into that unique room.
+NOVA's global orb can connect to a deployed LiveKit agent. The voice room is created only after the user selects **Connect LiveKit voice**. After the authenticated browser joins, NOVA explicitly dispatches the agent with a short-lived, room- and participant-bound tool credential in private job metadata. The tool credential is not embedded in or returned with the browser participant token.
 
 In Render → `nova-backend` → **Environment**, configure these server-only values:
 
 - `LIVEKIT_URL`: the LiveKit project WebSocket URL (`wss://...`), available in LiveKit Cloud project settings.
 - `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`: the project's server credentials. Keep them on the backend; never add them to frontend build variables.
 - `LIVEKIT_AGENT_NAME`: the exact Agent Builder agent name used for explicit dispatch.
+- `LIVEKIT_TOOL_TOKEN_SECRET`: a generated secret of at least 32 characters used only by the NOVA backend to sign short-lived tool credentials.
+- `LIVEKIT_AGENT_BRIDGE_SECRET`: a high-entropy server-to-server secret shared with the LiveKit agent deployment. Use the same value on both servers; the agent can only exchange it for a scoped credential while its matching LiveKit room and participants are active.
 - `LIVEKIT_VOICE_ENABLED`: set to `true` only after the values above are present and the agent is deployed.
 
-The Agent Builder preview is not a production deployment for dashboard rooms. Deploy the agent in LiveKit Cloud, and confirm its exact **Agent name** in Agent Builder. The token targets the production deployment by default; no agent dispatch URL is configured in NOVA. A fresh unique room is created on each connect, so LiveKit's token-based dispatch runs when the dashboard participant creates that room. NOVA's existing `LIVEKIT_SUMMARY_TOKEN` remains exclusively for completed-session summary ingestion.
+The Agent Builder preview is not a production deployment for dashboard rooms. Deploy the Python agent in LiveKit Cloud and confirm its exact dispatch name matches `LIVEKIT_AGENT_NAME`. NOVA uses LiveKit's explicit agent dispatch API after the browser joins; the configured production deployment is targeted by default. The backend initializes the `livekit_voice_sessions` and `livekit_voice_tool_requests` tables from `database/schema.sql`. Tool requests are limited to NOVA's existing read-only trading functions and explicit memory tools. Navigation is sent through a LiveKit RPC to the connected dashboard and only reports success after the browser acknowledges it. Payout access is not implemented. `LIVEKIT_SUMMARY_TOKEN` remains exclusively for completed-session summary ingestion.
 
-The browser microphone permission prompt appears after the user connects. The existing browser-native voice and wake phrase remain available as a fallback and are paused while LiveKit is connecting or connected. This phase does not send LiveKit speech to NOVA's dashboard AI tools; that requires the later voice-to-tools bridge.
+The browser microphone permission prompt appears after the user connects. The existing browser-native voice and wake phrase remain available as a fallback and are paused while LiveKit is connecting or connected. Configure `NOVA_BACKEND_URL`, `LIVEKIT_AGENT_BRIDGE_SECRET`, and `LIVEKIT_SUMMARY_TOKEN` in the LiveKit agent deployment environment; keep `LIVEKIT_TOOL_TOKEN_SECRET` only in the backend environment.
 
 ## Point GitHub Pages at the API
 

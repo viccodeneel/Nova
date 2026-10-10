@@ -7,7 +7,7 @@ import authRouter, { requireStrictAuth } from '../routes/auth.ts';
 import { createLivekitVoiceRouter } from '../routes/livekitVoice.ts';
 import { transitionLiveKitVoice } from '../../src/voice/livekitState.ts';
 
-const ENV_KEYS = ['NOVA_AUTH_SECRET', 'NOVA_AUTH_PASSWORD', 'LIVEKIT_VOICE_ENABLED', 'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'LIVEKIT_AGENT_NAME'] as const;
+const ENV_KEYS = ['NOVA_AUTH_SECRET', 'NOVA_AUTH_PASSWORD', 'LIVEKIT_VOICE_ENABLED', 'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'LIVEKIT_AGENT_NAME', 'LIVEKIT_TOOL_TOKEN_SECRET', 'LIVEKIT_AGENT_BRIDGE_SECRET'] as const;
 const oldEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 let server: Server;
 let baseUrl: string;
@@ -34,6 +34,8 @@ async function getStatus(token: string) {
 before(async () => {
   process.env.NOVA_AUTH_SECRET = 'test-dashboard-signing-secret-0123456789';
   process.env.NOVA_AUTH_PASSWORD = 'test-dashboard-password-123';
+  process.env.LIVEKIT_TOOL_TOKEN_SECRET = 'test-livekit-tool-token-secret-0123456789';
+  process.env.LIVEKIT_AGENT_BRIDGE_SECRET = 'test-livekit-agent-bridge-secret-0123456789';
   const app = express();
   app.use(express.json());
   app.use('/api/auth', authRouter);
@@ -56,6 +58,8 @@ beforeEach(() => {
   delete process.env.LIVEKIT_API_KEY;
   delete process.env.LIVEKIT_API_SECRET;
   delete process.env.LIVEKIT_AGENT_NAME;
+  delete process.env.LIVEKIT_TOOL_TOKEN_SECRET;
+  delete process.env.LIVEKIT_AGENT_BRIDGE_SECRET;
 });
 
 describe('LiveKit voice token route', () => {
@@ -88,6 +92,8 @@ describe('LiveKit voice token route', () => {
     process.env.LIVEKIT_API_KEY = 'unit-test-api-key';
     process.env.LIVEKIT_API_SECRET = 'unit-test-api-secret';
     process.env.LIVEKIT_AGENT_NAME = 'nova-builder-agent';
+    process.env.LIVEKIT_TOOL_TOKEN_SECRET = 'test-livekit-tool-token-secret-0123456789';
+    process.env.LIVEKIT_AGENT_BRIDGE_SECRET = 'test-livekit-agent-bridge-secret-0123456789';
 
     const response = await request('/api/livekit/voice/token', {
       method: 'POST',
@@ -95,7 +101,7 @@ describe('LiveKit voice token route', () => {
       body: JSON.stringify({ roomName: 'attacker-room', ownerId: 'another-user', permissions: ['roomAdmin'] }),
     });
     assert.equal(response.status, 201);
-    const body = await response.json() as { data: { serverUrl: string; roomName: string; participantToken: string } };
+    const body = await response.json() as { data: { serverUrl: string; roomName: string; participantIdentity: string; participantToken: string } };
     assert.equal(body.data.serverUrl, 'wss://voice.example.test');
     assert.match(body.data.roomName, /^nova-[0-9a-f-]{36}$/);
 
@@ -103,6 +109,7 @@ describe('LiveKit voice token route', () => {
       sub: string; nbf: number; exp: number; video: Record<string, unknown>;
     };
     assert.match(claims.sub, /^nova-owner-[0-9a-f-]{36}$/);
+    assert.equal(body.data.participantIdentity, claims.sub);
     assert.ok(claims.exp > claims.nbf && claims.exp - claims.nbf <= 600);
     assert.equal(claims.video.room, body.data.roomName);
     assert.equal(claims.video.roomJoin, true);
@@ -111,7 +118,8 @@ describe('LiveKit voice token route', () => {
     assert.equal(claims.video.canPublishData, false);
     assert.equal(claims.video.canPublishSources instanceof Array, true);
     assert.ok(JSON.stringify(claims).includes('microphone'));
-    assert.ok(JSON.stringify(claims).includes('nova-builder-agent'));
+    assert.equal(JSON.stringify(claims).includes('nova-builder-agent'), false);
+    assert.equal(JSON.stringify(claims).includes('tool_token'), false);
   });
 
   test('does not issue credentials when the feature is enabled with an invalid URL', async () => {
@@ -121,6 +129,8 @@ describe('LiveKit voice token route', () => {
     process.env.LIVEKIT_API_KEY = 'unit-test-api-key';
     process.env.LIVEKIT_API_SECRET = 'unit-test-api-secret';
     process.env.LIVEKIT_AGENT_NAME = 'nova-builder-agent';
+    process.env.LIVEKIT_TOOL_TOKEN_SECRET = 'test-livekit-tool-token-secret-0123456789';
+    process.env.LIVEKIT_AGENT_BRIDGE_SECRET = 'test-livekit-agent-bridge-secret-0123456789';
     const response = await request('/api/livekit/voice/token', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: '{}' });
     assert.equal(response.status, 503);
   });

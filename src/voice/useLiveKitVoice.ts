@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Participant, RemoteTrack, Room } from 'livekit-client';
+import type { NavSection } from '../data/terminalData.ts';
 import { ApiClient } from '../services/apiClient.ts';
 import { transitionLiveKitVoice, type LiveKitVoiceEvent, type LiveKitVoicePhase } from './livekitState.ts';
 
 interface Options {
   authenticated: boolean;
+  accountId?: string;
   onConnecting: () => void;
   onDisconnected: () => void;
+  onNavigate: (page: NavSection) => Promise<void>;
 }
 
 const activePhases: LiveKitVoicePhase[] = ['connecting', 'listening', 'speaking'];
@@ -33,7 +36,9 @@ function voiceErrorMessage(error: unknown): string {
   return 'Could not connect to LiveKit. Check the NOVA server configuration, network, and deployed agent.';
 }
 
-export function useLiveKitVoice({ authenticated, onConnecting, onDisconnected }: Options) {
+const navigationPages: NavSection[] = ['overview', 'trade-journal', 'analytics', 'accounts', 'ai', 'finance', 'settings'];
+
+export function useLiveKitVoice({ authenticated, accountId, onConnecting, onDisconnected, onNavigate }: Options) {
   const [phase, setPhase] = useState<LiveKitVoicePhase>('checking');
   const [message, setMessage] = useState('Checking LiveKit voice availability…');
   const [error, setError] = useState('');
@@ -41,8 +46,8 @@ export function useLiveKitVoice({ authenticated, onConnecting, onDisconnected }:
   const roomRef = useRef<Room | null>(null);
   const phaseRef = useRef<LiveKitVoicePhase>('checking');
   const generationRef = useRef(0);
-  const callbacksRef = useRef({ onConnecting, onDisconnected });
-  callbacksRef.current = { onConnecting, onDisconnected };
+  const callbacksRef = useRef({ onConnecting, onDisconnected, onNavigate });
+  callbacksRef.current = { onConnecting, onDisconnected, onNavigate };
 
   const move = useCallback((event: LiveKitVoiceEvent) => {
     const next = transitionLiveKitVoice(phaseRef.current, event);
@@ -103,13 +108,24 @@ export function useLiveKitVoice({ authenticated, onConnecting, onDisconnected }:
     const generation = ++generationRef.current;
     let room: Room | null = null;
     try {
-      const { Room: LiveKitRoom, RoomEvent, Track, isBrowserSupported } = await import('livekit-client');
+      const { Room: LiveKitRoom, RoomEvent, Track, ParticipantKind, isBrowserSupported } = await import('livekit-client');
       if (!isBrowserSupported()) throw new Error('BROWSER_UNSUPPORTED');
-      const credentials = await ApiClient.getLiveKitVoiceToken();
+      const credentials = await ApiClient.getLiveKitVoiceToken(accountId);
       if (generation !== generationRef.current) return;
       const connectedRoom = new LiveKitRoom({ adaptiveStream: true });
       room = connectedRoom;
       roomRef.current = connectedRoom;
+
+      connectedRoom.registerRpcMethod('nova.navigate', async ({ callerIdentity, payload }) => {
+        const caller = connectedRoom.remoteParticipants.get(callerIdentity);
+        if (!caller || caller.kind !== ParticipantKind.AGENT) throw new Error('Only the NOVA voice agent may request dashboard navigation.');
+        let request: { page?: unknown };
+        try { request = JSON.parse(payload) as { page?: unknown }; }
+        catch { throw new Error('Invalid navigation request.'); }
+        if (typeof request.page !== 'string' || !navigationPages.includes(request.page as NavSection)) throw new Error('That dashboard page is not available.');
+        await callbacksRef.current.onNavigate(request.page as NavSection);
+        return JSON.stringify({ success: true, page: request.page });
+      });
 
       connectedRoom.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
         if (track.kind !== Track.Kind.Audio) return;
@@ -150,6 +166,27 @@ export function useLiveKitVoice({ authenticated, onConnecting, onDisconnected }:
         await connectedRoom.disconnect();
         return;
       }
+      setMessage('Room connected. Starting the NOVA dashboard agent…');
+      await ApiClient.startLiveKitVoiceAgent(credentials.roomName, connectedRoom.localParticipant.identity);
+      if (generation !== generationRef.current || roomRef.current !== connectedRoom) return;
+      const agentAlreadyPresent = [...connectedRoom.remoteParticipants.values()].some((participant) => participant.kind === ParticipantKind.AGENT);
+      if (!agentAlreadyPresent) {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(() => { cleanup(); reject(new Error('NOVA_AGENT_TIMEOUT')); }, 20000);
+          const onParticipant = (participant: Participant) => {
+            if (participant.kind === ParticipantKind.AGENT) { cleanup(); resolve(); }
+          };
+          const onDisconnected = () => { cleanup(); reject(new Error('NOVA_AGENT_DISCONNECTED')); };
+          const cleanup = () => {
+            window.clearTimeout(timeout);
+            connectedRoom.off(RoomEvent.ParticipantConnected, onParticipant);
+            connectedRoom.off(RoomEvent.Disconnected, onDisconnected);
+          };
+          connectedRoom.on(RoomEvent.ParticipantConnected, onParticipant);
+          connectedRoom.on(RoomEvent.Disconnected, onDisconnected);
+        });
+      }
+      if (generation !== generationRef.current || roomRef.current !== connectedRoom) return;
       setAudioNeedsActivation(!connectedRoom.canPlaybackAudio);
       move('CONNECTED');
       setMessage('Connected to NOVA LiveKit voice. Tap Disconnect to end the session.');
@@ -158,7 +195,7 @@ export function useLiveKitVoice({ authenticated, onConnecting, onDisconnected }:
         roomRef.current = null;
         removeRemoteAudio(room);
         await room.disconnect().catch(() => undefined);
-      }
+  }
       if (generation === generationRef.current) {
         setError(voiceErrorMessage(cause));
         setMessage('LiveKit voice is disconnected. Browser voice remains available.');
@@ -166,7 +203,7 @@ export function useLiveKitVoice({ authenticated, onConnecting, onDisconnected }:
         callbacksRef.current.onDisconnected();
       }
     }
-  }, [authenticated, move]);
+  }, [accountId, authenticated, move]);
 
   const enableAudio = useCallback(async () => {
     const room = roomRef.current;

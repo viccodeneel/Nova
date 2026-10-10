@@ -297,3 +297,24 @@ CREATE INDEX IF NOT EXISTS idx_livekit_session_summaries_received ON livekit_ses
 -- Block Supabase's public (PostgREST/anon) API from reading transcripts. NOVA's backend connects as the
 -- table owner via DATABASE_URL, which bypasses RLS, so backend access is unaffected.
 ALTER TABLE livekit_session_summaries ENABLE ROW LEVEL SECURITY;
+
+-- Active dashboard-originated LiveKit sessions used to scope the voice tool bridge.
+CREATE TABLE IF NOT EXISTS livekit_voice_sessions (
+    room_name VARCHAR(128) PRIMARY KEY,
+    participant_identity VARCHAR(128) NOT NULL UNIQUE,
+    owner_id VARCHAR(64) NOT NULL,
+    account_id UUID REFERENCES trading_accounts(id) ON DELETE SET NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TIMESTAMPTZ
+);
+ALTER TABLE livekit_voice_sessions ADD COLUMN IF NOT EXISTS account_id UUID REFERENCES trading_accounts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_livekit_voice_sessions_expiry ON livekit_voice_sessions(expires_at);
+
+-- Deduplicates tool bridge requests to prevent replaying a captured request body.
+CREATE TABLE IF NOT EXISTS livekit_voice_tool_requests (
+    room_name VARCHAR(128) NOT NULL,
+    request_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (room_name, request_id)
+);
