@@ -1,11 +1,12 @@
 import { Router, type Request, type Response } from 'express';
 import { createProvider, runNovaAssistant } from '../ai/agent.ts';
+import { resolveProviderName } from '../ai/provider.ts';
 import { matchSimpleNavigation, runNovaAgent, type HistoryItem } from '../ai/novaAgent.ts';
 import { listMemories, removeMemory } from '../ai/memory.ts';
 
 const router = Router();
 router.get('/status', (_req: Request, res: Response) => {
-  const provider = (process.env.NOVA_AI_PROVIDER || 'anthropic').trim().toLowerCase();
+  const provider = resolveProviderName();
   const enabled = provider === 'anthropic' ? Boolean(process.env.ANTHROPIC_API_KEY)
     : provider === 'gemini' && Boolean(process.env.GEMINI_API_KEY);
   const expectedKey = provider === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
@@ -56,7 +57,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: { code: 'INVALID_ACCOUNT', message: 'The selected account ID is invalid.' } });
   }
 
-  const providerName = (process.env.NOVA_AI_PROVIDER || 'anthropic').trim().toLowerCase();
+  const providerName = resolveProviderName();
   const sendEvent = (data: Record<string, unknown>) => {
     if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
@@ -116,7 +117,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       TOOL_NOT_ALLOWED: 'NOVA rejected an unsupported tool request.',
       AI_LOOP_LIMIT: 'NOVA took too many steps on that request. Try asking it more simply.',
       AI_PROVIDER_ACCESS: 'The configured AI provider rejected its API key or account access. Check the provider key and model access.',
-      AI_PROVIDER_LIMIT: 'The AI provider’s quota or rate limit was reached. Check its API usage and billing limits.',
+      AI_PROVIDER_LIMIT: 'NOVA hit the AI provider’s rate or quota limit. On a free tier this usually clears within a minute, so try again shortly.',
       AI_MODEL_UNAVAILABLE: 'The configured AI model is unavailable. Check the selected provider and model setting in Render.',
       AI_PROVIDER_BAD_REQUEST: 'The AI provider rejected the request. Check the backend deployment and configured model.',
       AI_PROVIDER_UNAVAILABLE: 'The AI provider is temporarily unavailable. Try again shortly.',
