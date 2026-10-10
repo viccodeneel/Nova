@@ -1,0 +1,568 @@
+diff --git a/.env.example b/.env.example
+index 19050a6..0a0d398 100644
+--- a/.env.example
++++ b/.env.example
+@@ -20,6 +20,11 @@ MT5_BRIDGE_SECRET="YOUR_SECURE_RANDOM_BRIDGE_SECRET"
+ SYNC_INTERVAL_SECONDS=10
+ HISTORY_SYNC_INTERVAL_SECONDS=300
+ 
++# LIVEKIT_SUMMARY_TOKEN: Bearer token LiveKit's Agent Builder sends to POST /api/livekit/session-summary.
++# Generate a dedicated value (>= 32 chars), e.g. `openssl rand -hex 32`. Never reuse MT5_BRIDGE_SECRET.
++# If unset or shorter than 32 characters the endpoint returns 503 and accepts nothing.
++LIVEKIT_SUMMARY_TOKEN=""
++
+ # Dashboard sign-in (set both in Render; use a strong unique password)
+ NOVA_AUTH_PASSWORD="YOUR_UNIQUE_DASHBOARD_PASSWORD"
+ NOVA_AUTH_SECRET="GENERATE_A_RANDOM_SECRET_AT_LEAST_32_CHARACTERS_LONG"
+diff --git a/RENDER_SETUP.md b/RENDER_SETUP.md
+index 4119e85..39ef4a4 100644
+--- a/RENDER_SETUP.md
++++ b/RENDER_SETUP.md
+@@ -40,3 +40,11 @@ MT5 runs on your Windows computer, so keep the read-only connector running local
+ Start the local bridge with `python sync.py --server`. In NOVA, open **Accounts → Add Account** and enter the MT5 login number, server name, and read-only Investor Password. The browser sends those credentials directly to the local bridge; NOVA does not save the password. The connector authenticates with MT5 and pushes account snapshots to Render while it is running.
+ 
+ When the browser asks to allow NOVA to access your local network, allow it for the dashboard site. Keep the bridge key identical on the Render service and the local connector, and never put the Investor Password in `.env` or GitHub. The dashboard sign-in password is separate from MT5 credentials.
++
++## LiveKit voice agent: end-of-call summaries (optional)
++
++NOVA exposes `POST /api/livekit/session-summary` for the LiveKit Agent Builder's **Summary and data collection endpoint URL**. It is authenticated with its own bearer token and is separate from the dashboard password and the MT5 bridge key.
++
++1. In Render → `nova-backend` → **Environment**, add `LIVEKIT_SUMMARY_TOKEN` with a new random value of at least 32 characters (for example `openssl rand -hex 32`). Never reuse `MT5_BRIDGE_SECRET`. Without it, the endpoint returns 503 and accepts nothing.
++2. In LiveKit's Agent Builder → **Call ending**, set the endpoint URL to `https://<your-render-host>/api/livekit/session-summary` and add the header `Authorization` = `Bearer <the same token>`. Prefer a LiveKit secret (`Bearer {{secrets.NOVA_SUMMARY_TOKEN}}`) over pasting the value inline.
++3. Summaries are stored in the `livekit_session_summaries` table (created automatically at startup), keyed by `job_id` so retries are harmless. They are never added to NOVA's AI memory automatically.
+diff --git a/backend/routes/livekit.ts b/backend/routes/livekit.ts
+new file mode 100644
+index 0000000..66cefc8
+--- /dev/null
++++ b/backend/routes/livekit.ts
+@@ -0,0 +1,60 @@
++import { createHash, timingSafeEqual } from 'node:crypto';
++import { Router, type NextFunction, type Request, type Response } from 'express';
++import { validateSessionSummary, type SessionSummaryStore } from '../services/livekitSummaryService.ts';
++
++const MIN_TOKEN_LENGTH = 32;
++
++export interface LivekitRouterOptions {
++  store: SessionSummaryStore;
++  /** Read per request so rotating the env var takes effect on restart without code changes. */
++  getToken?: () => string | undefined;
++}
++
++// Hash both sides so timingSafeEqual always compares equal-length buffers.
++const digest = (v: string) => createHash('sha256').update(v).digest();
++
++function requireSummaryToken(getToken: () => string | undefined) {
++  return (req: Request, res: Response, next: NextFunction) => {
++    const expected = getToken();
++    // Fail closed: never accept requests when the token is missing or weak.
++    if (!expected || expected.length < MIN_TOKEN_LENGTH) {
++      return res.status(503).json({ success: false, error: 'LiveKit summary endpoint is not configured' });
++    }
++    const header = req.headers.authorization;
++    const match = typeof header === 'string' ? /^Bearer\s+(\S+)$/i.exec(header) : null;
++    if (!match || !timingSafeEqual(digest(match[1]), digest(expected))) {
++      res.setHeader('WWW-Authenticate', 'Bearer');
++      return res.status(401).json({ success: false, error: 'Unauthorized' });
++    }
++    next();
++  };
++}
++
++/**
++ * LiveKit Agent Builder "Summary and data collection endpoint".
++ * Mounted OUTSIDE requireAuth (LiveKit cannot hold a dashboard session) and
++ * authenticated only by LIVEKIT_SUMMARY_TOKEN. Deliberately independent of
++ * MT5_BRIDGE_SECRET and NOVA_AUTH_*.
++ */
++export function createLivekitRouter({ store, getToken = () => process.env.LIVEKIT_SUMMARY_TOKEN }: LivekitRouterOptions): Router {
++  const router = Router();
++
++  // POST /api/livekit/session-summary
++  router.post('/session-summary', requireSummaryToken(getToken), async (req: Request, res: Response) => {
++    const parsed = validateSessionSummary(req.body);
++    if (!parsed.ok) {
++      return res.status(400).json({ success: false, error: 'Invalid payload', details: parsed.errors });
++    }
++    try {
++      const { created } = await store.save(parsed.value);
++      // 201 first delivery, 200 for a retried/duplicate delivery. Both are success for the sender.
++      return res.status(created ? 201 : 200).json({ success: true, job_id: parsed.value.job_id, duplicate: !created });
++    } catch (err) {
++      // Log without payload content (summaries may contain personal or financial details).
++      console.error('[LiveKit] Failed to store session summary for job', parsed.value.job_id, (err as Error).message);
++      return res.status(500).json({ success: false, error: 'Failed to store session summary' });
++    }
++  });
++
++  return router;
++}
+diff --git a/backend/services/livekitSummaryService.ts b/backend/services/livekitSummaryService.ts
+new file mode 100644
+index 0000000..42d1c0b
+--- /dev/null
++++ b/backend/services/livekitSummaryService.ts
+@@ -0,0 +1,120 @@
++/**
++ * LiveKit Agent Builder end-of-call summary ingestion.
++ *
++ * Payload (per LiveKit's Agent Builder docs): job_id, room_id, room, started_at,
++ * ended_at, summary (optional), results (optional, data-collection mode).
++ *
++ * This module is deliberately free of database imports so validation and the
++ * in-memory store can be tested without touching DATABASE_URL. The PostgreSQL
++ * store lives in livekitSummaryStore.ts.
++ *
++ * Summaries are stored as-is for later review. Nothing here writes to NOVA's AI
++ * memory (nova_memories); that must remain an explicit, separate user action.
++ */
++
++export const LIMITS = {
++  JOB_ID_MAX: 128,
++  ID_MAX: 256,
++  SUMMARY_MAX_CHARS: 20_000,
++  RESULTS_MAX_BYTES: 100_000,
++} as const;
++
++const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
++
++export interface SessionSummary {
++  job_id: string;
++  room_id: string | null;
++  room: string | null;
++  started_at: string | null; // normalized ISO 8601
++  ended_at: string | null; // normalized ISO 8601
++  summary: string | null;
++  results: Record<string, unknown> | null;
++}
++
++export type ValidationResult =
++  | { ok: true; value: SessionSummary }
++  | { ok: false; errors: string[] };
++
++export interface SessionSummaryStore {
++  /** Inserts the summary. Returns created=false (and changes nothing) if job_id already exists. */
++  save(summary: SessionSummary): Promise<{ created: boolean }>;
++}
++
++const isPlainObject = (v: unknown): v is Record<string, unknown> =>
++  typeof v === 'object' && v !== null && !Array.isArray(v);
++
++function optionalString(body: Record<string, unknown>, key: string, max: number, errors: string[]): string | null {
++  const v = body[key];
++  if (v === undefined || v === null) return null;
++  if (typeof v !== 'string') { errors.push(`${key} must be a string`); return null; }
++  if (v.length > max) { errors.push(`${key} must be at most ${max} characters`); return null; }
++  return v;
++}
++
++function optionalTimestamp(body: Record<string, unknown>, key: string, errors: string[]): string | null {
++  const v = body[key];
++  if (v === undefined || v === null || v === '') return null;
++  if (typeof v !== 'string') { errors.push(`${key} must be an ISO 8601 timestamp string`); return null; }
++  const ms = Date.parse(v);
++  if (Number.isNaN(ms)) { errors.push(`${key} must be a valid ISO 8601 timestamp`); return null; }
++  return new Date(ms).toISOString();
++}
++
++/**
++ * Validates an untrusted request body. Only job_id is required: it is the
++ * idempotency key. Unknown top-level fields are ignored and never stored.
++ * Error messages never echo submitted values.
++ */
++export function validateSessionSummary(body: unknown): ValidationResult {
++  if (!isPlainObject(body)) return { ok: false, errors: ['Request body must be a JSON object'] };
++
++  const errors: string[] = [];
++
++  const jobId = body.job_id;
++  let job_id = '';
++  if (typeof jobId !== 'string' || jobId.length === 0) {
++    errors.push('job_id is required and must be a non-empty string');
++  } else if (jobId.length > LIMITS.JOB_ID_MAX || !JOB_ID_PATTERN.test(jobId)) {
++    errors.push(`job_id must be 1-${LIMITS.JOB_ID_MAX} characters of letters, digits, "_", "-", "." or ":"`);
++  } else {
++    job_id = jobId;
++  }
++
++  const room_id = optionalString(body, 'room_id', LIMITS.ID_MAX, errors);
++  const room = optionalString(body, 'room', LIMITS.ID_MAX, errors);
++  const started_at = optionalTimestamp(body, 'started_at', errors);
++  const ended_at = optionalTimestamp(body, 'ended_at', errors);
++  const summary = optionalString(body, 'summary', LIMITS.SUMMARY_MAX_CHARS, errors);
++
++  let results: Record<string, unknown> | null = null;
++  if (body.results !== undefined && body.results !== null) {
++    if (!isPlainObject(body.results)) {
++      errors.push('results must be a JSON object');
++    } else if (Buffer.byteLength(JSON.stringify(body.results), 'utf8') > LIMITS.RESULTS_MAX_BYTES) {
++      errors.push(`results must be at most ${LIMITS.RESULTS_MAX_BYTES} bytes when serialized`);
++    } else {
++      results = body.results;
++    }
++  }
++
++  if (errors.length > 0) return { ok: false, errors };
++  return { ok: true, value: { job_id, room_id, room, started_at, ended_at, summary, results } };
++}
++
++/** First-write-wins in-memory store. Used when no database is configured, and in tests. */
++export function createMemorySummaryStore(maxEntries = 500): SessionSummaryStore & { size(): number; get(jobId: string): SessionSummary | undefined } {
++  const rows = new Map<string, SessionSummary>();
++  return {
++    async save(summary) {
++      if (rows.has(summary.job_id)) return { created: false };
++      if (rows.size >= maxEntries) {
++        const oldest = rows.keys().next().value;
++        if (oldest !== undefined) rows.delete(oldest);
++      }
++      rows.set(summary.job_id, summary);
++      return { created: true };
++    },
++    size: () => rows.size,
++    get: (jobId) => rows.get(jobId),
++  };
++}
+diff --git a/backend/services/livekitSummaryStore.ts b/backend/services/livekitSummaryStore.ts
+new file mode 100644
+index 0000000..97785db
+--- /dev/null
++++ b/backend/services/livekitSummaryStore.ts
+@@ -0,0 +1,32 @@
++import { query, isDatabaseConnected } from '../../database/db.ts';
++import {
++  createMemorySummaryStore,
++  type SessionSummary,
++  type SessionSummaryStore,
++} from './livekitSummaryService.ts';
++
++/**
++ * Default store: PostgreSQL/Supabase when connected, otherwise the in-memory
++ * fallback (same convention as the other NOVA services).
++ *
++ * Idempotency: job_id is the primary key and the insert is
++ * ON CONFLICT DO NOTHING, so a retried delivery never overwrites or duplicates.
++ */
++export function createSessionSummaryStore(): SessionSummaryStore {
++  const fallback = createMemorySummaryStore();
++  return {
++    async save(s: SessionSummary) {
++      if (!isDatabaseConnected()) return fallback.save(s);
++      const r = await query(
++        `INSERT INTO livekit_session_summaries
++           (job_id, room_id, room, started_at, ended_at, summary, results)
++         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
++         ON CONFLICT (job_id) DO NOTHING
++         RETURNING job_id`,
++        [s.job_id, s.room_id, s.room, s.started_at, s.ended_at, s.summary, s.results === null ? null : JSON.stringify(s.results)],
++      );
++      if (!r) throw new Error('Database write failed');
++      return { created: r.rowCount === 1 };
++    },
++  };
++}
+diff --git a/backend/tests/livekitSessionSummary.test.ts b/backend/tests/livekitSessionSummary.test.ts
+new file mode 100644
+index 0000000..27ece85
+--- /dev/null
++++ b/backend/tests/livekitSessionSummary.test.ts
+@@ -0,0 +1,226 @@
++import { test, describe, before, after, beforeEach } from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import type { AddressInfo } from 'node:net';
++import type { Server } from 'node:http';
++import express from 'express';
++
++import { createLivekitRouter } from '../routes/livekit.ts';
++import {
++  createMemorySummaryStore,
++  validateSessionSummary,
++  LIMITS,
++  type SessionSummaryStore,
++} from '../services/livekitSummaryService.ts';
++
++const TOKEN = 'test-livekit-token-0123456789abcdef0123456789abcdef';
++const BRIDGE_SECRET = 'a-different-mt5-bridge-secret-0123456789abcdef';
++
++const validBody = () => ({
++  job_id: 'AJ_qsV4cAeZCDPF',
++  room_id: 'RM_abc123',
++  room: 'nova-voice-room',
++  started_at: '2026-10-10T12:00:00Z',
++  ended_at: '2026-10-10T12:05:30.123Z',
++  summary: 'The trader reviewed risk limits for the day.',
++  results: { risk_note: { text: 'stay under 1%', confirmed: true }, symbols: [{ name: 'EURUSD' }] },
++});
++
++let server: Server;
++let baseUrl: string;
++let store: ReturnType<typeof createMemorySummaryStore>;
++let activeStore: SessionSummaryStore;
++let tokenInEnv: string | undefined;
++
++async function post(body: unknown, headers: Record<string, string> = { authorization: `Bearer ${TOKEN}` }, raw = false) {
++  return fetch(`${baseUrl}/api/livekit/session-summary`, {
++    method: 'POST',
++    headers: { 'content-type': 'application/json', ...headers },
++    body: raw ? (body as string) : JSON.stringify(body),
++  });
++}
++
++before(async () => {
++  const app = express();
++  app.use(express.json({ limit: '10mb' }));
++  // The store is swappable per test via `activeStore`.
++  app.use('/api/livekit', createLivekitRouter({
++    store: { save: (s) => activeStore.save(s) },
++    getToken: () => tokenInEnv,
++  }));
++  server = await new Promise<Server>((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
++  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
++});
++
++after(async () => { await new Promise((r) => server.close(r)); });
++
++beforeEach(() => {
++  store = createMemorySummaryStore();
++  activeStore = store;
++  tokenInEnv = TOKEN;
++});
++
++describe('authentication', () => {
++  test('503 and nothing stored when LIVEKIT_SUMMARY_TOKEN is not configured', async () => {
++    tokenInEnv = undefined;
++    const res = await post(validBody());
++    assert.equal(res.status, 503);
++    assert.equal(store.size(), 0);
++  });
++
++  test('503 when the configured token is too short to be safe', async () => {
++    tokenInEnv = 'short';
++    const res = await post(validBody(), { authorization: 'Bearer short' });
++    assert.equal(res.status, 503);
++    assert.equal(store.size(), 0);
++  });
++
++  test('401 with no Authorization header', async () => {
++    const res = await post(validBody(), {});
++    assert.equal(res.status, 401);
++    assert.equal(res.headers.get('www-authenticate'), 'Bearer');
++    assert.equal(store.size(), 0);
++  });
++
++  test('401 for a wrong token, wrong scheme, and empty bearer', async () => {
++    for (const authorization of ['Bearer wrong-token', `Basic ${TOKEN}`, `Token ${TOKEN}`, 'Bearer ', TOKEN]) {
++      const res = await post(validBody(), { authorization });
++      assert.equal(res.status, 401, `expected 401 for "${authorization.slice(0, 12)}"`);
++    }
++    assert.equal(store.size(), 0);
++  });
++
++  test('MT5_BRIDGE_SECRET and the X-MT5-Bridge-Key header are not accepted', async () => {
++    const previous = process.env.MT5_BRIDGE_SECRET;
++    process.env.MT5_BRIDGE_SECRET = BRIDGE_SECRET;
++    try {
++      assert.equal((await post(validBody(), { authorization: `Bearer ${BRIDGE_SECRET}` })).status, 401);
++      assert.equal((await post(validBody(), { 'x-mt5-bridge-key': BRIDGE_SECRET })).status, 401);
++    } finally {
++      if (previous === undefined) delete process.env.MT5_BRIDGE_SECRET; else process.env.MT5_BRIDGE_SECRET = previous;
++    }
++    assert.equal(store.size(), 0);
++  });
++
++  test('responses never contain the token', async () => {
++    const res = await post(validBody(), { authorization: 'Bearer nope' });
++    assert.ok(!(await res.text()).includes(TOKEN));
++  });
++});
++
++describe('storing summaries', () => {
++  test('201 on first delivery and the payload is stored', async () => {
++    const res = await post(validBody());
++    assert.equal(res.status, 201);
++    assert.deepEqual(await res.json(), { success: true, job_id: 'AJ_qsV4cAeZCDPF', duplicate: false });
++    const saved = store.get('AJ_qsV4cAeZCDPF');
++    assert.equal(saved?.room, 'nova-voice-room');
++    assert.equal(saved?.started_at, '2026-10-10T12:00:00.000Z');
++    assert.deepEqual(saved?.results, validBody().results);
++  });
++
++  test('idempotent: a retried job_id returns 200 duplicate and does not overwrite', async () => {
++    assert.equal((await post(validBody())).status, 201);
++    const retry = await post({ ...validBody(), summary: 'DIFFERENT TEXT' });
++    assert.equal(retry.status, 200);
++    assert.deepEqual(await retry.json(), { success: true, job_id: 'AJ_qsV4cAeZCDPF', duplicate: true });
++    assert.equal(store.size(), 1);
++    assert.equal(store.get('AJ_qsV4cAeZCDPF')?.summary, validBody().summary);
++  });
++
++  test('accepts the minimal payload (job_id only) and summary-only / results-only payloads', async () => {
++    assert.equal((await post({ job_id: 'AJ_min' })).status, 201);
++    assert.equal((await post({ job_id: 'AJ_sum', summary: 'hi' })).status, 201);
++    assert.equal((await post({ job_id: 'AJ_res', results: { a: { b: 1 } } })).status, 201);
++    assert.equal(store.size(), 3);
++  });
++
++  test('ignores unknown top-level fields instead of storing them', async () => {
++    await post({ ...validBody(), job_id: 'AJ_extra', admin: true, __proto__: { polluted: true } });
++    const saved = store.get('AJ_extra') as unknown as Record<string, unknown>;
++    assert.equal(saved.admin, undefined);
++    assert.equal(({} as Record<string, unknown>).polluted, undefined);
++  });
++
++  test('500 with a generic message when the store fails, without leaking details', async () => {
++    activeStore = { save: async () => { throw new Error('connection to db.secret-host:5432 refused'); } };
++    const res = await post(validBody());
++    assert.equal(res.status, 500);
++    const text = await res.text();
++    assert.ok(!text.includes('secret-host'));
++  });
++});
++
++describe('validation (400)', () => {
++  test('rejects a missing, empty, non-string, oversized or malformed job_id', async () => {
++    const { job_id: _omit, ...withoutJobId } = validBody();
++    for (const body of [
++      withoutJobId,
++      { ...validBody(), job_id: '' },
++      { ...validBody(), job_id: 123 },
++      { ...validBody(), job_id: 'x'.repeat(LIMITS.JOB_ID_MAX + 1) },
++      { ...validBody(), job_id: "AJ_1'; DROP TABLE trades;--" },
++      { ...validBody(), job_id: '../../etc/passwd' },
++    ]) {
++      assert.equal((await post(body)).status, 400);
++    }
++    assert.equal(store.size(), 0);
++  });
++
++  test('rejects bad field types and invalid timestamps', async () => {
++    for (const patch of [
++      { room: 5 }, { room_id: {} }, { summary: ['a'] }, { results: 'text' }, { results: [1, 2] },
++      { started_at: 'yesterday' }, { ended_at: 12345 },
++    ]) {
++      assert.equal((await post({ ...validBody(), ...patch })).status, 400, JSON.stringify(patch));
++    }
++    assert.equal(store.size(), 0);
++  });
++
++  test('rejects oversized summary and results', async () => {
++    assert.equal((await post({ ...validBody(), summary: 'a'.repeat(LIMITS.SUMMARY_MAX_CHARS + 1) })).status, 400);
++    assert.equal((await post({ ...validBody(), results: { blob: 'a'.repeat(LIMITS.RESULTS_MAX_BYTES) } })).status, 400);
++    assert.equal(store.size(), 0);
++  });
++
++  test('rejects non-object bodies and does not echo submitted values in errors', async () => {
++    const res = await post([{ job_id: 'AJ_x' }]);
++    assert.equal(res.status, 400);
++    const secretish = await post({ ...validBody(), room: 'SENSITIVE-VALUE'.repeat(100) });
++    assert.equal(secretish.status, 400);
++    assert.ok(!(await secretish.text()).includes('SENSITIVE-VALUE'));
++  });
++
++  test('validateSessionSummary normalizes absent optionals to null', () => {
++    const r = validateSessionSummary({ job_id: 'AJ_1' });
++    assert.ok(r.ok);
++    if (r.ok) assert.deepEqual(r.value, { job_id: 'AJ_1', room_id: null, room: null, started_at: null, ended_at: null, summary: null, results: null });
++  });
++});
++
++describe('scope guardrails', () => {
++  // Strip comments so documentation mentioning these names doesn't trip the scan; only executable code counts.
++  const read = (rel: string) => fs.readFileSync(path.resolve(import.meta.dirname, rel), 'utf8')
++    .replace(/\/\*[\s\S]*?\*\//g, '')
++    .replace(/(^|[^:])\/\/.*$/gm, '$1');
++  const files = ['../routes/livekit.ts', '../services/livekitSummaryService.ts', '../services/livekitSummaryStore.ts'];
++
++  test('summary ingestion never touches NOVA AI memory', () => {
++    for (const f of files) {
++      const src = read(f);
++      assert.ok(!/ai\/memory|nova_memories|addMemory/.test(src), `${f} must not reference AI memory`);
++    }
++  });
++
++  test('summary ingestion does not reference MT5_BRIDGE_SECRET', () => {
++    for (const f of files) assert.ok(!read(f).includes('MT5_BRIDGE_SECRET'), `${f} must not use the MT5 bridge secret`);
++  });
++
++  test('the route is mounted outside requireAuth in server.ts and under its own path', () => {
++    const server = fs.readFileSync(path.resolve(import.meta.dirname, '../../server.ts'), 'utf8');
++    const line = server.split('\n').find((l) => l.includes("'/api/livekit'"));
++    assert.ok(line, 'expected /api/livekit to be mounted');
++    assert.ok(!line.includes('requireAuth'));
++  });
++});
+diff --git a/database/schema.sql b/database/schema.sql
+index 5c2401a..c90be42 100644
+--- a/database/schema.sql
++++ b/database/schema.sql
+@@ -279,3 +279,21 @@ CREATE TABLE IF NOT EXISTS nova_memories (
+     last_used_at TIMESTAMPTZ,
+     use_count INT NOT NULL DEFAULT 0
+ );
++
++
++-- LiveKit Agent Builder end-of-call summaries (received at POST /api/livekit/session-summary).
++-- job_id is the idempotency key. Rows are stored for review only; they are never copied into nova_memories automatically.
++CREATE TABLE IF NOT EXISTS livekit_session_summaries (
++    job_id VARCHAR(128) PRIMARY KEY,
++    room_id VARCHAR(256),
++    room VARCHAR(256),
++    started_at TIMESTAMPTZ,
++    ended_at TIMESTAMPTZ,
++    summary TEXT,
++    results JSONB,
++    received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
++);
++CREATE INDEX IF NOT EXISTS idx_livekit_session_summaries_received ON livekit_session_summaries(received_at DESC);
++-- Block Supabase's public (PostgREST/anon) API from reading transcripts. NOVA's backend connects as the
++-- table owner via DATABASE_URL, which bypasses RLS, so backend access is unaffected.
++ALTER TABLE livekit_session_summaries ENABLE ROW LEVEL SECURITY;
+diff --git a/package.json b/package.json
+index f86cdd0..19e79d2 100644
+--- a/package.json
++++ b/package.json
+@@ -9,7 +9,8 @@
+     "build": "vite build",
+     "preview": "vite preview",
+     "clean": "rm -rf dist server.js",
+-    "lint": "tsc --noEmit"
++    "lint": "tsc --noEmit",
++    "test": "node --test \"backend/**/*.test.ts\""
+   },
+   "dependencies": {
+     "@google/genai": "^2.4.0",
+diff --git a/render.yaml b/render.yaml
+index ffea640..b987c7d 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -21,5 +21,7 @@ services:
+         generateValue: true
+       - key: MT5_BRIDGE_SECRET
+         generateValue: true
++      - key: LIVEKIT_SUMMARY_TOKEN
++        sync: false
+       - key: CORS_ORIGIN
+         value: https://viccodeneel.github.io
+diff --git a/server.ts b/server.ts
+index aabff0f..c5cc357 100644
+--- a/server.ts
++++ b/server.ts
+@@ -23,6 +23,8 @@ import profileRouter from './backend/routes/profile.ts';
+ import financeRouter from './backend/routes/finance.ts';
+ import authRouter, { requireAuth } from './backend/routes/auth.ts';
+ import aiRouter from './backend/routes/ai.ts';
++import { createLivekitRouter } from './backend/routes/livekit.ts';
++import { createSessionSummaryStore } from './backend/services/livekitSummaryStore.ts';
+ 
+ async function startServer() {
+   const app = express();
+@@ -78,6 +80,8 @@ async function startServer() {
+     if (req.path === '/sync-webhook') return next();
+     return requireAuth(req, res, next);
+   }, connectorRouter);
++  // LiveKit Agent Builder end-of-call summaries: NOT behind requireAuth; authenticated by its own LIVEKIT_SUMMARY_TOKEN.
++  app.use('/api/livekit', createLivekitRouter({ store: createSessionSummaryStore() }));
+ 
+   // Health endpoint
+   app.get('/api/health', (req, res) => {
