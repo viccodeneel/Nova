@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { createProvider, runNovaAssistant } from '../ai/agent.ts';
 import { resolveProviderName } from '../ai/provider.ts';
+import { isWebSearchConfigured } from '../ai/webTools.ts';
 import { matchSimpleNavigation, runNovaAgent, type HistoryItem } from '../ai/novaAgent.ts';
 import { listMemories, removeMemory } from '../ai/memory.ts';
 
@@ -10,7 +11,7 @@ router.get('/status', (_req: Request, res: Response) => {
   const enabled = provider === 'anthropic' ? Boolean(process.env.ANTHROPIC_API_KEY)
     : provider === 'gemini' && Boolean(process.env.GEMINI_API_KEY);
   const expectedKey = provider === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
-  res.json({ success: true, data: { enabled, provider: enabled ? provider : null, expected_key: expectedKey } });
+  res.json({ success: true, data: { enabled, provider: enabled ? provider : null, expected_key: expectedKey, web_search: isWebSearchConfigured() } });
 });
 
 const TABS = ['overview', 'trade-journal', 'analytics', 'accounts', 'ai', 'finance', 'settings'];

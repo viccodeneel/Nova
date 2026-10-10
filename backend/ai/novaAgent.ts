@@ -1,6 +1,7 @@
 import { createProvider, withTransientRetry } from './agent.ts';
 import type { AssistantProvider, ChatMsg, CompleteResult, TextChunkHandler } from './provider.ts';
-import { AGENT_TOOLS, NAVIGATION_PAGES, executeAgentTool, type AgentPage } from './agentTools.ts';
+import { NAVIGATION_PAGES, executeAgentTool, getAgentTools, type AgentPage } from './agentTools.ts';
+import { isWebSearchConfigured } from './webTools.ts';
 import { buildSystemPrompt } from './persona.ts';
 import { retrieveRelevant } from './memory.ts';
 import { getProfile } from '../services/profileService.ts';
@@ -42,7 +43,8 @@ export async function runNovaAgent(input: AgentInput, provider: AssistantProvide
   if (!provider.complete) throw Object.assign(new Error('Provider does not support tool calling.'), { code: 'AI_NOT_CONFIGURED' });
   const started = Date.now();
   const [profile, memories] = await Promise.all([getProfile().catch(() => ({ display_name: 'there' })), retrieveRelevant(input.message).catch(() => [])]);
-  const system = buildSystemPrompt({ userName: profile.display_name || 'there', now: new Date(), activeTab: input.activeTab, mode: input.mode, memories });
+  const system = buildSystemPrompt({ userName: profile.display_name || 'there', now: new Date(), activeTab: input.activeTab, mode: input.mode, memories, webSearch: isWebSearchConfigured() });
+  const tools = getAgentTools();
   const messages = buildMessages(input.history, input.message);
   const toolLog: AgentResult['toolCalls'] = [];
   let navigation: AgentResult['navigation'] = null;
@@ -53,7 +55,7 @@ export async function runNovaAgent(input: AgentInput, provider: AssistantProvide
 
   for (let step = 0; step < MAX_STEPS; step += 1) {
     const turn = await withTransientRetry(
-      () => provider.complete!({ system, messages, tools: AGENT_TOOLS, maxTokens: input.mode === 'voice' ? 500 : 900 }, onText && ((t) => { streamed = true; onText(t); })),
+      () => provider.complete!({ system, messages, tools, maxTokens: input.mode === 'voice' ? 500 : 900 }, onText && ((t) => { streamed = true; onText(t); })),
       () => streamed, () => undefined,
     );
     if (!turn.toolCalls.length) { final = turn; break; }

@@ -5,6 +5,7 @@ import { listItems } from '../services/financeService.ts';
 import { getAccountInfo } from './tools.ts';
 import { MEMORY_KINDS, addMemory, forgetMatching, normalize, type MemoryKind } from './memory.ts';
 import type { AssistantTool } from './provider.ts';
+import { getWeather, isWebSearchConfigured, webSearch } from './webTools.ts';
 
 export const NAVIGATION_PAGES = {
   overview: 'Dashboard', 'trade-journal': 'Trade Journal', analytics: 'Analytics', accounts: 'Accounts', ai: 'NOVA', finance: 'Net Worth', settings: 'Settings',
@@ -12,8 +13,8 @@ export const NAVIGATION_PAGES = {
 export type AgentPage = keyof typeof NAVIGATION_PAGES;
 export interface AgentToolContext { accountId?: string; userMessage: string }
 type Args = Record<string, unknown>;
-// Permission model: 'read' and 'ui' run automatically; 'memory' is gated by backend checks; money-moving actions do not exist yet.
-type Risk = 'read' | 'ui' | 'memory';
+// Permission model: 'read' and 'ui' run automatically; 'external' reaches third-party services (queries leave the server); 'memory' is gated by backend checks; money-moving actions do not exist yet.
+type Risk = 'read' | 'ui' | 'memory' | 'external';
 interface ToolDef { name: string; description: string; properties: Record<string, unknown>; required?: string[]; risk: Risk; run: (args: Args, ctx: AgentToolContext) => Promise<unknown> }
 
 const PERIODS = ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'all'] as const;
@@ -132,6 +133,24 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'web_search', risk: 'external', required: ['query'],
+    properties: {
+      query: { type: 'string', maxLength: 300, description: 'A focused search query. Never include account balances, trade details, or personal information.' },
+      topic: { type: 'string', enum: ['general', 'news'], description: 'Use news for recent events and market news.' },
+    },
+    description: 'Search the live web. Use for current events, news, prices, recent releases, or anything that may have changed since your training. Not for his own account data (use the account tools).',
+    run: (args) => webSearch(args),
+  },
+  {
+    name: 'get_weather', risk: 'external',
+    properties: {
+      location: { type: 'string', description: 'City name. Omit to use the configured default location.' },
+      days: { type: 'integer', minimum: 1, maximum: 3, description: 'Forecast days, default 2.' },
+    },
+    description: 'Current weather and a short forecast for a city.',
+    run: (args) => getWeather(args),
+  },
+  {
     name: 'navigate_to_tab', risk: 'ui', required: ['page'],
     properties: { page: { type: 'string', enum: Object.keys(NAVIGATION_PAGES), description: 'overview = Dashboard, trade-journal = trades/journal, analytics, accounts, finance = Net Worth, settings, ai = NOVA home.' } },
     description: 'Open a section of the NOVA dashboard. Use when he wants to go to, open, or see a page, including loosely worded requests such as "show me where my trades are" (trade-journal).',
@@ -171,10 +190,13 @@ const TOOLS: ToolDef[] = [
   },
 ];
 
-export const AGENT_TOOLS: AssistantTool[] = TOOLS.map((t) => ({
+const ALL_TOOLS: AssistantTool[] = TOOLS.map((t) => ({
   name: t.name, description: t.description,
   parametersJsonSchema: { type: 'object', properties: t.properties, ...(t.required ? { required: t.required } : {}), additionalProperties: false },
 })) as AssistantTool[];
+
+/** web_search is only offered when a search key exists, so NOVA never claims a capability it lacks. */
+export const getAgentTools = (): AssistantTool[] => ALL_TOOLS.filter((t) => t.name !== 'web_search' || isWebSearchConfigured());
 
 export async function executeAgentTool(name: string, args: Args, ctx: AgentToolContext): Promise<unknown> {
   const tool = TOOLS.find((t) => t.name === name);
