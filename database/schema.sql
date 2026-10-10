@@ -279,3 +279,21 @@ CREATE TABLE IF NOT EXISTS nova_memories (
     last_used_at TIMESTAMPTZ,
     use_count INT NOT NULL DEFAULT 0
 );
+
+
+-- LiveKit Agent Builder end-of-call summaries (received at POST /api/livekit/session-summary).
+-- job_id is the idempotency key. Rows are stored for review only; they are never copied into nova_memories automatically.
+CREATE TABLE IF NOT EXISTS livekit_session_summaries (
+    job_id VARCHAR(128) PRIMARY KEY,
+    room_id VARCHAR(256),
+    room VARCHAR(256),
+    started_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
+    summary TEXT,
+    results JSONB,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_livekit_session_summaries_received ON livekit_session_summaries(received_at DESC);
+-- Block Supabase's public (PostgREST/anon) API from reading transcripts. NOVA's backend connects as the
+-- table owner via DATABASE_URL, which bypasses RLS, so backend access is unaffected.
+ALTER TABLE livekit_session_summaries ENABLE ROW LEVEL SECURITY;
