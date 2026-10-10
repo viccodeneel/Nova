@@ -23,6 +23,8 @@ import profileRouter from './backend/routes/profile.ts';
 import financeRouter from './backend/routes/finance.ts';
 import authRouter, { requireAuth } from './backend/routes/auth.ts';
 import aiRouter from './backend/routes/ai.ts';
+import { createLivekitRouter } from './backend/routes/livekit.ts';
+import { createSessionSummaryStore } from './backend/services/livekitSummaryStore.ts';
 
 async function startServer() {
   const app = express();
@@ -78,6 +80,8 @@ async function startServer() {
     if (req.path === '/sync-webhook') return next();
     return requireAuth(req, res, next);
   }, connectorRouter);
+  // LiveKit Agent Builder end-of-call summaries: NOT behind requireAuth; authenticated by its own LIVEKIT_SUMMARY_TOKEN.
+  app.use('/api/livekit', createLivekitRouter({ store: createSessionSummaryStore() }));
 
   // Health endpoint
   app.get('/api/health', (req, res) => {

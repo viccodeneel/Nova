@@ -40,3 +40,11 @@ MT5 runs on your Windows computer, so keep the read-only connector running local
 Start the local bridge with `python sync.py --server`. In NOVA, open **Accounts → Add Account** and enter the MT5 login number, server name, and read-only Investor Password. The browser sends those credentials directly to the local bridge; NOVA does not save the password. The connector authenticates with MT5 and pushes account snapshots to Render while it is running.
 
 When the browser asks to allow NOVA to access your local network, allow it for the dashboard site. Keep the bridge key identical on the Render service and the local connector, and never put the Investor Password in `.env` or GitHub. The dashboard sign-in password is separate from MT5 credentials.
+
+## LiveKit voice agent: end-of-call summaries (optional)
+
+NOVA exposes `POST /api/livekit/session-summary` for the LiveKit Agent Builder's **Summary and data collection endpoint URL**. It is authenticated with its own bearer token and is separate from the dashboard password and the MT5 bridge key.
+
+1. In Render → `nova-backend` → **Environment**, add `LIVEKIT_SUMMARY_TOKEN` with a new random value of at least 32 characters (for example `openssl rand -hex 32`). Never reuse `MT5_BRIDGE_SECRET`. Without it, the endpoint returns 503 and accepts nothing.
+2. In LiveKit's Agent Builder → **Call ending**, set the endpoint URL to `https://<your-render-host>/api/livekit/session-summary` and add the header `Authorization` = `Bearer <the same token>`. Prefer a LiveKit secret (`Bearer {{secrets.NOVA_SUMMARY_TOKEN}}`) over pasting the value inline.
+3. Summaries are stored in the `livekit_session_summaries` table (created automatically at startup), keyed by `job_id` so retries are harmless. They are never added to NOVA's AI memory automatically.

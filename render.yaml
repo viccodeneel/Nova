@@ -21,5 +21,7 @@ services:
         generateValue: true
       - key: MT5_BRIDGE_SECRET
         generateValue: true
+      - key: LIVEKIT_SUMMARY_TOKEN
+        sync: false
       - key: CORS_ORIGIN
         value: https://viccodeneel.github.io
