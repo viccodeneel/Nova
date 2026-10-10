@@ -58,7 +58,7 @@ export async function runNovaAgent(input: AgentInput, provider: AssistantProvide
     );
     if (!turn.toolCalls.length) { final = turn; break; }
     if (turn.text) carry = turn.text;
-    messages.push({ role: 'assistant', text: turn.text, toolCalls: turn.toolCalls });
+    messages.push({ role: 'assistant', text: turn.text, toolCalls: turn.toolCalls, continuation: turn.continuation });
     const results = await Promise.all(turn.toolCalls.map(async (call) => {
       try {
         const result = await executeAgentTool(call.name, call.args, { accountId: input.accountId, userMessage: input.message });
