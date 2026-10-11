@@ -42,8 +42,14 @@ export function buildMessages(history: HistoryItem[], message: string): ChatMsg[
 export async function runNovaAgent(input: AgentInput, provider: AssistantProvider = createProvider(), onText?: TextChunkHandler): Promise<AgentResult> {
   if (!provider.complete) throw Object.assign(new Error('Provider does not support tool calling.'), { code: 'AI_NOT_CONFIGURED' });
   const started = Date.now();
-  const [profile, memories] = await Promise.all([getProfile().catch(() => ({ display_name: 'there' })), retrieveRelevant(input.message).catch(() => [])]);
-  const system = buildSystemPrompt({ userName: profile.display_name || 'there', now: new Date(), activeTab: input.activeTab, mode: input.mode, memories, webSearch: isWebSearchConfigured() });
+  const [profile, memoryResult] = await Promise.all([
+    getProfile().catch(() => ({ display_name: 'there' })),
+    retrieveRelevant(input.message).then((memories) => ({ memories, available: true })).catch((error) => {
+      console.warn('[NOVA memory] retrieval unavailable', { code: (error as { code?: string }).code || 'MEMORY_READ_FAILED' });
+      return { memories: [], available: false };
+    }),
+  ]);
+  const system = buildSystemPrompt({ userName: profile.display_name || 'there', now: new Date(), activeTab: input.activeTab, mode: input.mode, memories: memoryResult.memories, memoryAvailable: memoryResult.available, webSearch: isWebSearchConfigured() });
   const tools = getAgentTools();
   const messages = buildMessages(input.history, input.message);
   const toolLog: AgentResult['toolCalls'] = [];

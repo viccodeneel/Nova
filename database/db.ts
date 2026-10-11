@@ -38,7 +38,11 @@ if (databaseUrl) {
     });
 
     pool.on('error', (err) => {
-      console.error('[PostgreSQL] Unexpected client error on idle client:', err);
+      const safe = err as { name?: unknown; code?: unknown };
+      console.error('[PostgreSQL] unexpected idle-client error', {
+        errorType: typeof safe?.name === 'string' ? safe.name : 'Error',
+        databaseCode: typeof safe?.code === 'string' ? safe.code : undefined,
+      });
     });
   } catch (err) {
     console.warn('[PostgreSQL] Could not initialize pool:', err);
@@ -56,7 +60,11 @@ export async function query<T extends pg.QueryResultRow = any>(text: string, par
     isConnected = true;
     return res;
   } catch (err) {
-    console.error('[PostgreSQL Query Error]:', err);
+    const safe = err as { name?: unknown; code?: unknown };
+    console.error('[PostgreSQL] query failed', {
+      errorType: typeof safe?.name === 'string' ? safe.name : 'Error',
+      databaseCode: typeof safe?.code === 'string' ? safe.code : undefined,
+    });
     throw err;
   }
 }
@@ -85,7 +93,11 @@ export async function initializeDatabase(): Promise<boolean> {
       client.release();
     }
   } catch (err) {
-    console.warn('[PostgreSQL] Database connection failed. Will use in-memory store:', (err as Error).message);
+    const safe = err as { name?: unknown; code?: unknown };
+    console.warn('[PostgreSQL] database initialization failed', {
+      errorType: typeof safe?.name === 'string' ? safe.name : 'Error',
+      databaseCode: typeof safe?.code === 'string' ? safe.code : undefined,
+    });
     isConnected = false;
     return false;
   }

@@ -5,7 +5,8 @@ import { consumeLiveKitToolRequest, getLiveKitVoiceSession } from '../services/l
 import { verifyLiveKitToolCredential, type LiveKitToolClaims } from '../services/livekitToolCredential.ts';
 
 const READ_TOOLS = new Set(['get_account_info', 'get_pnl', 'get_trades', 'get_open_positions']);
-const MEMORY_TOOLS = new Set(['remember', 'forget']);
+const MEMORY_READ_TOOLS = new Set(['recall_memories']);
+const MEMORY_WRITE_TOOLS = new Set(['remember', 'update_memory', 'forget']);
 const PERIODS = new Set(['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'all']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,6 +39,18 @@ function parseArgs(name: string, raw: unknown): Record<string, unknown> | null {
   }
   if (name === 'forget') {
     if (!onlyKeys(['description']) || typeof args.description !== 'string' || !args.description.trim() || args.description.length > 300) return null;
+    return args;
+  }
+  if (name === 'recall_memories') {
+    if (!onlyKeys(['query']) || typeof args.query !== 'string' || !args.query.trim() || args.query.length > 300) return null;
+    return { query: args.query.trim() };
+  }
+  if (name === 'update_memory') {
+    if (!onlyKeys(['description', 'content', 'kind', 'evidence'])) return null;
+    if (typeof args.description !== 'string' || !args.description.trim() || args.description.length > 300) return null;
+    if (typeof args.content !== 'string' || !args.content.trim() || args.content.length > 300) return null;
+    if (args.kind !== undefined && !['preference', 'goal', 'fact', 'rule', 'project', 'event'].includes(String(args.kind))) return null;
+    if (typeof args.evidence !== 'string' || args.evidence.length < 4 || args.evidence.length > 500) return null;
     return args;
   }
   return null;
@@ -85,7 +98,9 @@ export function createLivekitVoiceToolRouter(dependencies: LiveKitVoiceToolDepen
     const requestId = typeof req.body?.request_id === 'string' ? req.body.request_id : '';
     const userMessage = typeof req.body?.user_message === 'string' ? req.body.user_message.trim() : '';
     const args = parseArgs(name, req.body?.arguments);
-    const permitted = READ_TOOLS.has(name) ? claims.scope.includes('account:read') || claims.scope.includes('trades:read') : MEMORY_TOOLS.has(name) && claims.scope.includes('memory:manage');
+    const permitted = READ_TOOLS.has(name) ? claims.scope.includes('account:read') || claims.scope.includes('trades:read')
+      : MEMORY_READ_TOOLS.has(name) ? claims.scope.includes('memory:read')
+        : MEMORY_WRITE_TOOLS.has(name) && claims.scope.includes('memory:manage');
     if (!permitted || !args || !UUID.test(requestId) || !userMessage || userMessage.length > 2000) {
       return res.status(400).json({ success: false, error: 'Voice tool name or arguments are not supported.' });
     }
@@ -99,8 +114,19 @@ export function createLivekitVoiceToolRouter(dependencies: LiveKitVoiceToolDepen
       return res.json({ success: true, data: result });
     } catch (error) {
       const code = (error as { code?: string }).code;
-      const status = code === 'TOOL_TIMEOUT' ? 504 : code === 'NO_ACCOUNT' || code === 'ACCOUNT_SELECTION_REQUIRED' ? 409 : 503;
-      return res.status(status).json({ success: false, error: code === 'TOOL_TIMEOUT' ? 'The NOVA data service timed out. Please try again.' : (error as Error).message || 'NOVA could not retrieve that data.' });
+      console.warn('[NOVA voice tools] request failed', { tool: name, code: typeof code === 'string' ? code : 'TOOL_FAILED' });
+      const status = code === 'TOOL_TIMEOUT' ? 504
+        : code === 'MEMORY_NOT_AUTHORISED' ? 403
+          : code === 'MEMORY_INVALID' || code === 'INVALID_ARGUMENT' ? 400
+            : code === 'NO_ACCOUNT' || code === 'ACCOUNT_SELECTION_REQUIRED' || code === 'MEMORY_FULL' ? 409 : 503;
+      const safeMessage = code === 'MEMORY_NOT_AUTHORISED' ? 'That memory action needs a clear request from you.'
+        : code === 'MEMORY_INVALID' ? 'The replacement memory is empty or invalid.'
+          : code === 'MEMORY_STORAGE_FAILED' ? 'NOVA memory storage is unavailable right now.'
+            : code === 'MEMORY_FULL' ? 'NOVA memory is full. Forget a note before saving another.'
+              : code === 'TOOL_TIMEOUT' ? 'The NOVA data service timed out. Please try again.'
+                : code === 'NO_ACCOUNT' || code === 'ACCOUNT_SELECTION_REQUIRED' ? (error as Error).message
+                  : 'NOVA could not complete that dashboard request.';
+      return res.status(status).json({ success: false, error: safeMessage });
     }
   });
   return router;

@@ -3,7 +3,7 @@ import { getTradesByAccount } from '../services/tradeService.ts';
 import { getProfile } from '../services/profileService.ts';
 import { listItems } from '../services/financeService.ts';
 import { getAccountInfo } from './tools.ts';
-import { MEMORY_KINDS, addMemory, forgetMatching, normalize, type MemoryKind } from './memory.ts';
+import { MEMORY_KINDS, addMemory, forgetMatching, normalize, retrieveRelevant, updateMatchingMemory, type MemoryKind } from './memory.ts';
 import type { AssistantTool } from './provider.ts';
 import { getWeather, isWebSearchConfigured, webSearch } from './webTools.ts';
 
@@ -175,6 +175,35 @@ const TOOLS: ToolDef[] = [
       if (!MEMORY_KINDS.includes(args.kind as MemoryKind) || typeof args.content !== 'string') throw fail('INVALID_ARGUMENT', 'content and a valid kind are required');
       const { memory, duplicate } = await addMemory(args.kind as MemoryKind, args.content);
       return { saved: !duplicate, already_known: duplicate, id: memory.id };
+    },
+  },
+  {
+    name: 'recall_memories', risk: 'memory', required: ['query'],
+    properties: { query: { type: 'string', minLength: 1, maxLength: 300, description: 'A short topic or phrase from the current question to find relevant saved notes.' } },
+    description: 'Retrieve relevant saved NOVA notes when prior preferences or user context would help answer. Returns only notes relevant to the query.',
+    run: async (args) => {
+      if (typeof args.query !== 'string' || !args.query.trim()) throw fail('INVALID_ARGUMENT', 'query is required');
+      const memories = await retrieveRelevant(args.query.trim().slice(0, 300), 5);
+      return { memories: memories.map(({ kind, content }) => ({ kind, content })) };
+    },
+  },
+  {
+    name: 'update_memory', risk: 'memory', required: ['description', 'content', 'evidence'],
+    properties: {
+      description: { type: 'string', minLength: 1, maxLength: 300, description: 'Describe which existing saved note should be changed.' },
+      content: { type: 'string', minLength: 1, maxLength: 300, description: 'The replacement note, as a short standalone statement.' },
+      kind: { type: 'string', enum: MEMORY_KINDS, description: 'Optional replacement note category; existing category is kept when omitted.' },
+      evidence: { type: 'string', minLength: 4, maxLength: 500, description: 'Exact words from the user explicitly asking to update the saved note.' },
+    },
+    description: 'Update one existing saved note ONLY when the user explicitly asks to update or correct what NOVA remembers. Never rewrite a note based on casual chat.',
+    run: async (args, ctx) => {
+      const evidence = typeof args.evidence === 'string' ? normalize(args.evidence) : '';
+      const explicit = /\b(update|change|correct|replace|revise)\b/i.test(ctx.userMessage) && /\b(memory|memories|note|notes|remember|remembers)\b/i.test(ctx.userMessage);
+      if (!explicit || evidence.length < 4 || !normalize(ctx.userMessage).includes(evidence)) throw fail('MEMORY_NOT_AUTHORISED', 'The user did not explicitly ask to update a saved note.');
+      if (typeof args.description !== 'string' || typeof args.content !== 'string' || (args.kind !== undefined && !MEMORY_KINDS.includes(args.kind as MemoryKind))) throw fail('INVALID_ARGUMENT', 'A description, replacement content, and valid optional kind are required.');
+      const result = await updateMatchingMemory(args.description, args.kind as MemoryKind | undefined, args.content);
+      if (result.ambiguous.length) return { updated: false, needs_clarification: true, candidates: result.ambiguous };
+      return result.updated ? { updated: true, kind: result.updated.kind } : { updated: false, not_found: true };
     },
   },
   {

@@ -61,6 +61,8 @@ describe('LiveKit delegated credentials', () => {
     assert.equal(claims?.participant, PARTICIPANT);
     assert.equal(claims?.accountId, ACCOUNT);
     assert.ok(claims?.scope.includes('account:read'));
+    assert.ok(claims?.scope.includes('memory:read'));
+    assert.ok(claims?.scope.includes('memory:manage'));
     assert.ok(claims?.exp && claims.exp - claims.iat <= 600);
   });
 
@@ -80,6 +82,10 @@ describe('LiveKit tool bridge', () => {
   test('validates allowlisted names and strict argument schemas', () => {
     assert.deepEqual(validateLiveKitToolArguments('get_account_info', {}), {});
     assert.deepEqual(validateLiveKitToolArguments('get_trades', { limit: 5, symbol: 'EURUSD' }), { limit: 5, symbol: 'EURUSD' });
+    assert.deepEqual(validateLiveKitToolArguments('recall_memories', { query: 'chart timeframe' }), { query: 'chart timeframe' });
+    assert.equal(validateLiveKitToolArguments('recall_memories', { query: ' ' }), null);
+    assert.equal(validateLiveKitToolArguments('update_memory', { description: 'chart timeframe', content: 'H1', evidence: 'please update memory' })?.description, 'chart timeframe');
+    assert.equal(validateLiveKitToolArguments('update_memory', { description: 'chart timeframe', content: 'H1', evidence: 'please update memory', owner_id: 'other' }), null);
     assert.equal(validateLiveKitToolArguments('get_trades', { limit: '5' }), null);
     assert.equal(validateLiveKitToolArguments('get_payouts', {}), null);
     assert.equal(validateLiveKitToolArguments('get_trades', { owner_id: 'other-user' }), null);
@@ -97,6 +103,32 @@ describe('LiveKit tool bridge', () => {
     const historyBody = await history.json() as { success: boolean; data: { trades: Array<{ symbol: string; net_profit: number }> } };
     assert.equal(historyBody.data.trades[0].symbol, 'EURUSD');
     assert.equal(historyBody.data.trades[0].net_profit, 25);
+  });
+
+  test('saves, recalls in a later request, updates, and forgets a user-approved memory through the authenticated bridge', async () => {
+    const unique = randomUUID();
+    const original = `NOVA test ${unique} prefers chart interval H4`;
+    const replacement = `NOVA test ${unique} prefers chart interval H1`;
+    const unapproved = await post({ name: 'remember', arguments: { content: original, kind: 'preference', evidence: 'I like this' }, user_message: 'I like this chart interval.', request_id: randomUUID() });
+    assert.equal(unapproved.status, 403);
+
+    const remember = await post({ name: 'remember', arguments: { content: original, kind: 'preference', evidence: 'remember my chart interval' }, user_message: 'Please remember my chart interval is H4.', request_id: randomUUID() });
+    assert.equal(remember.status, 200);
+    assert.equal((await remember.json() as { data: { saved: boolean } }).data.saved, true);
+
+    const recall = await post({ name: 'recall_memories', arguments: { query: `chart interval ${unique}` }, user_message: 'What chart interval do I prefer?', request_id: randomUUID() });
+    assert.equal(recall.status, 200);
+    assert.match(JSON.stringify(await recall.json()), /H4/);
+
+    const update = await post({ name: 'update_memory', arguments: { description: `chart interval ${unique}`, content: replacement, evidence: 'update my saved memory' }, user_message: `Please update my saved memory about chart interval ${unique} to H1.`, request_id: randomUUID() });
+    assert.equal(update.status, 200);
+    assert.equal((await update.json() as { data: { updated: boolean } }).data.updated, true);
+    const recalledUpdated = await post({ name: 'recall_memories', arguments: { query: `chart interval ${unique}` }, user_message: 'What is my chart interval?', request_id: randomUUID() });
+    assert.match(JSON.stringify(await recalledUpdated.json()), /H1/);
+
+    const forget = await post({ name: 'forget', arguments: { description: `chart interval ${unique}` }, user_message: `Please forget my chart interval ${unique}.`, request_id: randomUUID() });
+    assert.equal(forget.status, 200);
+    assert.equal((await forget.json() as { data: { removed: number } }).data.removed, 1);
   });
 
   test('rejects unsupported tools and bad arguments without executing them', async () => {

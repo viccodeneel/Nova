@@ -12,7 +12,18 @@ const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 const STOP = new Set('the and for are but you your with that this from have has was were what when where which who how why can could would should will shall about into over just not all any out our his her its they them then than there here been being also very more some such only own same too did does doing done get got let lets say said tell give make made'.split(' '));
 
 export const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-const tokens = (s: string) => normalize(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w)).map((w) => w.slice(0, 6));
+const tokens = (s: string) => normalize(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));
+
+function storageError(operation: string, error: unknown): never {
+  const code = (error as { code?: unknown })?.code;
+  console.error('[NOVA memory] storage operation failed', { operation, databaseCode: typeof code === 'string' ? code : undefined });
+  throw Object.assign(new Error('NOVA memory storage is temporarily unavailable.'), { code: 'MEMORY_STORAGE_FAILED' });
+}
+
+function logMetadataError(operation: string, error: unknown): void {
+  const code = (error as { code?: unknown })?.code;
+  console.warn('[NOVA memory] metadata update failed', { operation, databaseCode: typeof code === 'string' ? code : undefined });
+}
 
 const norm = (r: any): Memory => ({
   id: r.id, kind: r.kind, content: r.content, use_count: Number(r.use_count || 0),
@@ -21,8 +32,11 @@ const norm = (r: any): Memory => ({
 
 export async function listMemories(): Promise<Memory[]> {
   if (isDatabaseConnected()) {
-    const r = await query('SELECT * FROM nova_memories ORDER BY created_at DESC');
-    return (r?.rows ?? []).map(norm);
+    try {
+      const r = await query('SELECT * FROM nova_memories ORDER BY created_at DESC');
+      if (!r) throw new Error('database unavailable');
+      return r.rows.map(norm);
+    } catch (error) { return storageError('list', error); }
   }
   return [...memory.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
@@ -35,9 +49,11 @@ export async function addMemory(kind: MemoryKind, content: string): Promise<{ me
   if (existing) return { memory: existing, duplicate: true };
   if (all.length >= MAX_MEMORIES) throw Object.assign(new Error('Memory is full. Ask NOVA to forget something first.'), { code: 'MEMORY_FULL' });
   if (isDatabaseConnected()) {
-    const r = await query('INSERT INTO nova_memories (kind, content) VALUES ($1, $2) RETURNING *', [kind, text]);
-    if (!r) throw new Error('Database write failed');
-    return { memory: norm(r.rows[0]), duplicate: false };
+    try {
+      const r = await query('INSERT INTO nova_memories (kind, content) VALUES ($1, $2) RETURNING *', [kind, text]);
+      if (!r?.rows[0]) throw new Error('database unavailable');
+      return { memory: norm(r.rows[0]), duplicate: false };
+    } catch (error) { return storageError('save', error); }
   }
   const created: Memory = { id: randomUUID(), kind, content: text, created_at: new Date().toISOString(), last_used_at: null, use_count: 0 };
   memory.set(created.id, created);
@@ -47,10 +63,37 @@ export async function addMemory(kind: MemoryKind, content: string): Promise<{ me
 export async function removeMemory(id: string): Promise<boolean> {
   if (isDatabaseConnected()) {
     if (!isUuid(id)) return false;
-    const r = await query('DELETE FROM nova_memories WHERE id = $1 RETURNING id', [id]);
-    return !!r && r.rows.length > 0;
+    try {
+      const r = await query('DELETE FROM nova_memories WHERE id = $1 RETURNING id', [id]);
+      if (!r) throw new Error('database unavailable');
+      return r.rows.length > 0;
+    } catch (error) { return storageError('delete', error); }
   }
   return memory.delete(id);
+}
+
+/** Update only one clearly matched note; ambiguous descriptions require the user to clarify. */
+export async function updateMatchingMemory(description: string, kind: MemoryKind | undefined, content: string): Promise<{ updated: Memory | null; ambiguous: string[] }> {
+  const text = content.trim().slice(0, MAX_CONTENT);
+  if (!text) throw Object.assign(new Error('Memory is empty.'), { code: 'MEMORY_INVALID' });
+  const want = new Set(tokens(description));
+  if (!want.size) return { updated: null, ambiguous: [] };
+  const ranked = (await listMemories()).map((m) => ({ m, hits: tokens(m.content).filter((t) => want.has(t)).length }))
+    .filter((x) => x.hits > 0).sort((a, b) => b.hits - a.hits);
+  if (!ranked.length) return { updated: null, ambiguous: [] };
+  const top = ranked.filter((x) => x.hits === ranked[0].hits);
+  if (top.length !== 1) return { updated: null, ambiguous: top.slice(0, 5).map((x) => x.m.content) };
+  const existing = top[0].m;
+  if (isDatabaseConnected()) {
+    try {
+      const r = await query('UPDATE nova_memories SET kind = $2, content = $3 WHERE id = $1 RETURNING *', [existing.id, kind || existing.kind, text]);
+      if (!r?.rows[0]) throw new Error('database unavailable');
+      return { updated: norm(r.rows[0]), ambiguous: [] };
+    } catch (error) { return storageError('update', error); }
+  }
+  const updated = { ...existing, kind: kind || existing.kind, content: text };
+  memory.set(existing.id, updated);
+  return { updated, ambiguous: [] };
 }
 
 /** Removes memories matching a description. Refuses when the match is ambiguous so a vague "forget it" can't wipe things. */
@@ -64,7 +107,7 @@ export async function forgetMatching(description: string): Promise<{ removed: st
   if (!scored.length) return { removed: [], ambiguous: [] };
   const best = scored[0].hits;
   const top = scored.filter((x) => x.hits === best);
-  if (top.length > 3) return { removed: [], ambiguous: top.slice(0, 5).map((x) => x.m.content) };
+  if (top.length > 1) return { removed: [], ambiguous: top.slice(0, 5).map((x) => x.m.content) };
   for (const { m } of top) await removeMemory(m.id);
   return { removed: top.map((x) => x.m.content), ambiguous: [] };
 }
@@ -81,7 +124,10 @@ export async function retrieveRelevant(text: string, limit = 6): Promise<Memory[
     return { m, score: overlap * 2 + (m.kind === 'rule' || m.kind === 'preference' ? 0.5 : 0) + Math.max(0, 0.5 - ageDays / 60) };
   }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.m);
   if (ranked.length) {
-    if (isDatabaseConnected()) await query('UPDATE nova_memories SET use_count = use_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE id = ANY($1::uuid[])', [ranked.map((m) => m.id)]).catch(() => null);
+    if (isDatabaseConnected()) {
+      try { await query('UPDATE nova_memories SET use_count = use_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE id = ANY($1::uuid[])', [ranked.map((m) => m.id)]); }
+      catch (error) { logMetadataError('mark-used', error); }
+    }
     else ranked.forEach((m) => { const cur = memory.get(m.id); if (cur) memory.set(m.id, { ...cur, use_count: cur.use_count + 1, last_used_at: new Date().toISOString() }); });
   }
   return ranked;

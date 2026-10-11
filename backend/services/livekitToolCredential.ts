@@ -2,7 +2,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const ISSUER = 'nova-livekit-voice';
 const AUDIENCE = 'nova-livekit-tools';
-const SCOPES = ['account:read', 'trades:read', 'memory:manage'] as const;
+const SCOPES = ['account:read', 'trades:read', 'memory:read', 'memory:manage'] as const;
 const MAX_TTL_SECONDS = 10 * 60;
 
 export interface LiveKitToolClaims {

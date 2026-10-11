@@ -279,6 +279,9 @@ CREATE TABLE IF NOT EXISTS nova_memories (
     last_used_at TIMESTAMPTZ,
     use_count INT NOT NULL DEFAULT 0
 );
+-- Memory is accessed only through NOVA's authenticated backend connection. Block direct
+-- Supabase client/PostgREST access; the backend database owner continues to bypass RLS.
+ALTER TABLE nova_memories ENABLE ROW LEVEL SECURITY;
 
 
 -- LiveKit Agent Builder end-of-call summaries (received at POST /api/livekit/session-summary).
