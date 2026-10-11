@@ -7,6 +7,7 @@ import type { Server } from 'node:http';
 import { createLivekitVoiceToolRouter, validateLiveKitToolArguments } from '../routes/livekitVoiceTools.ts';
 import { signLiveKitToolCredential, verifyLiveKitToolCredential } from '../services/livekitToolCredential.ts';
 import { inMemoryStore } from '../services/inMemoryStore.ts';
+import { addMemory, removeMemory } from '../ai/memory.ts';
 
 const SECRET = 'unit-test-livekit-tool-signing-secret-0123456789';
 const PARTICIPANT = `nova-owner-${randomUUID()}`;
@@ -129,6 +130,26 @@ describe('LiveKit tool bridge', () => {
     const forget = await post({ name: 'forget', arguments: { description: `chart interval ${unique}` }, user_message: `Please forget my chart interval ${unique}.`, request_id: randomUUID() });
     assert.equal(forget.status, 200);
     assert.equal((await forget.json() as { data: { removed: number } }).data.removed, 1);
+  });
+
+  test('recalls a saved Nova Persist title when the model query is broad but the user utterance names it', async () => {
+    const tag = randomUUID();
+    const content = `Nova Persist ${tag} is the cobalt notebook test fact.`;
+    const { memory } = await addMemory('fact', content);
+    try {
+      const response = await post({
+        name: 'recall_memories',
+        arguments: { query: 'the saved fact' },
+        user_message: `What does Nova Persist ${tag} mean?`,
+        request_id: randomUUID(),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json() as { success: boolean; data: { memories: Array<{ kind: string; content: string }> } };
+      assert.equal(body.success, true);
+      assert.ok(body.data.memories.some((item) => item.kind === 'fact' && item.content === content));
+    } finally {
+      await removeMemory(memory.id);
+    }
   });
 
   test('rejects unsupported tools and bad arguments without executing them', async () => {

@@ -3,6 +3,7 @@ import { RoomServiceClient } from 'livekit-server-sdk';
 import { executeAgentTool } from '../ai/agentTools.ts';
 import { consumeLiveKitToolRequest, getLiveKitVoiceSession } from '../services/livekitVoiceSessionStore.ts';
 import { verifyLiveKitToolCredential, type LiveKitToolClaims } from '../services/livekitToolCredential.ts';
+import { isDatabaseConnected } from '../../database/db.ts';
 
 const READ_TOOLS = new Set(['get_account_info', 'get_pnl', 'get_trades', 'get_open_positions']);
 const MEMORY_READ_TOOLS = new Set(['recall_memories']);
@@ -111,6 +112,13 @@ export function createLivekitVoiceToolRouter(dependencies: LiveKitVoiceToolDepen
         executeTool(name, args, { accountId: claims.accountId, userMessage }),
         new Promise<never>((_resolve, reject) => setTimeout(() => reject(Object.assign(new Error('Tool request timed out.'), { code: 'TOOL_TIMEOUT' })), 10000)),
       ]);
+      if (name === 'recall_memories') {
+        const memories = (result as { memories?: unknown } | null)?.memories;
+        console.info('[NOVA voice tools] memory recall completed', {
+          resultCount: Array.isArray(memories) ? memories.length : 0,
+          storage: isDatabaseConnected() ? 'postgres' : 'memory',
+        });
+      }
       return res.json({ success: true, data: result });
     } catch (error) {
       const code = (error as { code?: string }).code;

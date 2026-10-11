@@ -181,9 +181,12 @@ const TOOLS: ToolDef[] = [
     name: 'recall_memories', risk: 'memory', required: ['query'],
     properties: { query: { type: 'string', minLength: 1, maxLength: 300, description: 'A short topic or phrase from the current question to find relevant saved notes.' } },
     description: 'Retrieve relevant saved NOVA notes when prior preferences or user context would help answer. Returns only notes relevant to the query.',
-    run: async (args) => {
+    run: async (args, ctx) => {
       if (typeof args.query !== 'string' || !args.query.trim()) throw fail('INVALID_ARGUMENT', 'query is required');
-      const memories = await retrieveRelevant(args.query.trim().slice(0, 300), 5);
+      // The model's query can be a broad paraphrase; include the user's actual latest
+      // utterance so names and unique phrases such as a memory title remain searchable.
+      const searchText = `${args.query.trim().slice(0, 300)} ${ctx.userMessage.slice(0, 2000)}`;
+      const memories = await retrieveRelevant(searchText, 5);
       return { memories: memories.map(({ kind, content }) => ({ kind, content })) };
     },
   },
