@@ -152,8 +152,14 @@ export default function App() {
   const [syncToast, setSyncToast] = useState<{ success: boolean; message: string } | null>(null);
   const [backendDown, setBackendDown] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('nova_sidebar_collapsed') === 'true'; } catch { return false; }
+  });
   const [profile, setProfile] = useState<Profile>({ display_name: '', avatar: null, currency: 'USD', networth_goal: null });
   useEffect(() => { setMenuOpen(false); }, [activeNav]);
+  useEffect(() => {
+    try { localStorage.setItem('nova_sidebar_collapsed', String(sidebarCollapsed)); } catch { /* Storage may be unavailable in private contexts. */ }
+  }, [sidebarCollapsed]);
   useEffect(() => {
     if (!authToken) return;
     ApiClient.getProfile().then(setProfile).catch(() => undefined);
@@ -620,25 +626,28 @@ export default function App() {
       <div className="min-h-screen bg-[#050812] text-slate-100 antialiased">
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden"><div className="absolute -top-40 left-1/4 h-[550px] w-[750px] rounded-full bg-violet-600/[0.08] blur-[140px]"/><div className="absolute top-1/3 -right-24 h-[600px] w-[600px] rounded-full bg-cyan-500/[0.05] blur-[150px]"/></div>
         {menuOpen && <div className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />}
-        <aside className={`fixed left-0 top-0 z-50 flex h-full w-64 flex-col justify-between border-r border-blue-300/[0.08] bg-[#070b16]/95 shadow-[4px_0_32px_rgba(0,0,0,.45)] backdrop-blur-2xl transition-transform duration-300 ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+        <aside className={`fixed left-0 top-0 z-50 flex h-full w-64 ${sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-64'} flex-col justify-between border-r border-blue-300/[0.08] bg-[#070b16]/95 shadow-[4px_0_32px_rgba(0,0,0,.45)] backdrop-blur-2xl transition-[width,transform] duration-200 ease-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
           <div>
-            <button type="button" onClick={() => setActiveNav('overview')} className="flex h-[74px] w-full items-center gap-3 border-b border-blue-200/[0.08] px-5 text-left">
+            <div className={`flex h-[74px] w-full items-center border-b border-blue-200/[0.08] ${sidebarCollapsed ? 'justify-between px-4 lg:justify-center lg:px-2' : 'justify-between px-5'}`}>
+            <button type="button" onClick={() => setActiveNav('overview')} title="NOVA Dashboard" className={`flex min-w-0 items-center gap-3 text-left ${sidebarCollapsed ? 'justify-center' : ''}`}>
               <span className="nova-brand-star"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 2 29 18 46 24 29 29 24 46 18 29 2 24 18 18 24 2Z" stroke="currentColor" strokeWidth="2"/><path d="m24 11 3 10 10 3-10 3-3 10-3-10-10-3 10-3 3-10Z" fill="currentColor" fillOpacity=".32"/></svg></span>
-              <span><strong className="block font-headline-sm text-lg font-medium tracking-[.24em] text-white">NOVA</strong><small className="mt-1 block text-[9px] tracking-wide text-slate-500">Trade smarter. Live freer.</small></span>
+              <span className={sidebarCollapsed ? 'lg:hidden' : ''}><strong className="block font-headline-sm text-lg font-medium tracking-[.24em] text-white">NOVA</strong><small className="mt-1 block text-[9px] tracking-wide text-slate-500">Trade smarter. Live freer.</small></span>
             </button>
-            <p className="px-5 pb-2 pt-6 font-label-tech text-[9px] uppercase tracking-[.2em] text-slate-600">Workspace</p>
-            <nav aria-label="Primary" className="flex flex-col gap-1 px-3">
-              {NAV_ITEMS.map((item) => <button key={item.id} type="button" onClick={() => { setActiveNav(item.id); if (item.id === 'accounts') setIsConnectAccountOpen(true); }} aria-current={activeNav === item.id ? 'page' : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-sm transition ${activeNav === item.id ? 'border border-violet-400/25 bg-gradient-to-r from-violet-600/25 to-blue-600/[0.04] font-medium text-white shadow-[0_0_24px_rgba(111,78,218,.1)]' : 'border border-transparent text-slate-400 hover:bg-white/[0.035] hover:text-slate-100'}`}><span className={`material-symbols-outlined text-[19px] ${activeNav === item.id ? 'text-violet-300' : 'text-slate-500'}`}>{item.icon}</span>{item.label}</button>)}
+            {!sidebarCollapsed && <button type="button" onClick={() => setSidebarCollapsed(true)} aria-label="Collapse sidebar" title="Collapse sidebar" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-white/5 hover:text-white"><ChevronRight className="rotate-180" size={16}/></button>}
+            </div>
+            <p className={`px-5 pb-2 pt-6 font-label-tech text-[9px] uppercase tracking-[.2em] text-slate-600 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>Workspace</p>
+            {sidebarCollapsed && <button type="button" onClick={() => setSidebarCollapsed(false)} aria-label="Expand sidebar" title="Expand sidebar" className="mx-auto mt-3 hidden h-9 w-9 place-items-center rounded-lg border border-white/[.07] text-slate-400 transition hover:border-violet-400/30 hover:text-white lg:grid"><ChevronRight size={16}/></button>}
+            <nav aria-label="Primary" className={`mt-2 flex flex-col gap-1 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
+              {NAV_ITEMS.map((item) => <button key={item.id} type="button" onClick={() => { setActiveNav(item.id); if (item.id === 'accounts') setIsConnectAccountOpen(true); }} aria-current={activeNav === item.id ? 'page' : undefined} aria-label={sidebarCollapsed ? item.label : undefined} title={sidebarCollapsed ? item.label : undefined} className={`flex w-full items-center rounded-xl py-2.5 text-sm transition ${sidebarCollapsed ? 'gap-3 px-3.5 text-left lg:justify-center lg:px-0' : 'gap-3 px-3.5 text-left'} ${activeNav === item.id ? 'border border-violet-400/25 bg-gradient-to-r from-violet-600/25 to-blue-600/[0.04] font-medium text-white shadow-[0_0_24px_rgba(111,78,218,.1)]' : 'border border-transparent text-slate-400 hover:bg-white/[0.035] hover:text-slate-100'}`}><span className={`material-symbols-outlined text-[19px] ${activeNav === item.id ? 'text-violet-300' : 'text-slate-500'}`}>{item.icon}</span><span className={sidebarCollapsed ? 'lg:hidden' : ''}>{item.label}</span></button>)}
             </nav>
           </div>
-          <div className="m-3 rounded-xl border border-blue-300/[0.1] bg-gradient-to-br from-[#10182e] to-[#080d19] p-3.5">
-            <div className="flex items-center gap-2"><span className={`status-dot ${linkState === 'CONNECTED' ? 'is-online' : ''}`}/><span className="font-label-tech text-[9px] uppercase tracking-wider text-slate-300">{linkLabel}</span></div>
-            <p className="mt-2 text-[10px] leading-relaxed text-slate-500">{backendDown ? 'Dashboard data service is unavailable.' : 'Connect an account to load your live trading overview.'}</p>
-            <button type="button" onClick={() => void handleSyncFromHeader()} className="mt-2 text-[10px] text-violet-300 hover:text-violet-200">Refresh connection</button>
+          <div className={`m-3 rounded-xl border border-blue-300/[0.1] bg-gradient-to-br from-[#10182e] to-[#080d19] ${sidebarCollapsed ? 'p-3 lg:flex lg:justify-center' : 'p-3.5'}`} title={sidebarCollapsed ? linkLabel : undefined}>
+            <div className="flex items-center gap-2"><span className={`status-dot ${linkState === 'CONNECTED' ? 'is-online' : ''}`}/><span className={sidebarCollapsed ? 'lg:hidden font-label-tech text-[9px] uppercase tracking-wider text-slate-300' : 'font-label-tech text-[9px] uppercase tracking-wider text-slate-300'}>{linkLabel}</span></div>
+            <div className={sidebarCollapsed ? 'lg:hidden' : ''}><p className="mt-2 text-[10px] leading-relaxed text-slate-500">{backendDown ? 'Dashboard data service is unavailable.' : 'Connect an account to load your live trading overview.'}</p><button type="button" onClick={() => void handleSyncFromHeader()} className="mt-2 text-[10px] text-violet-300 hover:text-violet-200">Refresh connection</button></div>
           </div>
         </aside>
-        <div className="relative z-10 lg:pl-64 xl:pr-[320px]">
-          <header className="fixed left-0 right-0 top-0 z-40 flex h-[74px] items-center justify-between gap-3 border-b border-blue-200/[0.08] bg-[#050812]/85 px-3 backdrop-blur-xl sm:px-6 lg:left-64">
+        <div className={`relative z-10 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-64'} xl:pr-[320px]`}>
+          <header className={`fixed left-0 right-0 top-0 z-40 flex h-[74px] items-center justify-between gap-3 border-b border-blue-200/[0.08] bg-[#050812]/85 px-3 backdrop-blur-xl transition-[left] duration-200 ease-out sm:px-6 ${sidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-64'}`}>
             <div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Open menu" onClick={() => setMenuOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">menu</span></button><div><h1 className="truncate text-sm font-semibold text-white sm:text-base">{greeting}{profile.display_name ? `, ${profile.display_name}` : ''}</h1><p className="hidden text-[10px] text-slate-500 sm:block">Your personal trading command center</p></div></div>
             <div className="flex items-center gap-2"><div className="hidden rounded-lg border border-blue-200/[0.09] bg-white/[0.025] px-3 py-2 text-[10px] text-slate-300 sm:block"><span className="text-slate-500">UTC</span> · {formatUtcClock(utcSeconds)}</div>{!import.meta.env.DEV && <button type="button" onClick={handleSignOut} className="rounded-lg border border-white/10 px-3 py-2 text-[10px] text-slate-300 hover:bg-white/5">Sign out</button>}<button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-3 py-2 text-[10px] font-semibold text-white shadow-[0_5px_20px_rgba(93,68,202,.22)]"><span className="sm:hidden">Connect</span><span className="hidden sm:inline">Connect account</span></button></div>
           </header>
@@ -672,17 +681,18 @@ export default function App() {
 
       {/* Sidebar Navigation */}
       {menuOpen && <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />}
-      <aside className={`fixed left-0 top-0 h-full w-64 bg-[#0a0c13]/90 backdrop-blur-2xl z-50 flex flex-col justify-between border-r border-white/[0.07] shadow-[4px_0_30px_rgba(0,0,0,0.6)] transition-transform duration-300 ease-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+      <aside className={`fixed left-0 top-0 h-full w-64 ${sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-64'} bg-[#0a0c13]/90 backdrop-blur-2xl z-50 flex flex-col justify-between border-r border-white/[0.07] shadow-[4px_0_30px_rgba(0,0,0,0.6)] transition-[width,transform] duration-200 ease-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
         <div className="flex flex-col">
-          <div className="h-16 px-4 flex items-center justify-between border-b border-white/[0.06] bg-white/[0.01]">
+          <div className={`h-16 flex items-center border-b border-white/[0.06] bg-white/[0.01] ${sidebarCollapsed ? 'justify-between px-4 lg:justify-center lg:px-2' : 'justify-between px-4'}`}>
             <div
               onClick={() => setActiveNav('overview')}
-              className="flex items-center gap-3 cursor-pointer"
+              title="NOVA Dashboard"
+              className={`flex items-center gap-3 cursor-pointer ${sidebarCollapsed ? 'justify-center' : ''}`}
             >
               <div className="nova-brand-star" aria-hidden="true">
                 <svg viewBox="0 0 48 48" fill="none"><path d="M24 2 29 18 46 24 29 29 24 46 18 29 2 24 18 18 24 2Z" stroke="currentColor" strokeWidth="2"/><path d="m24 11 3 10 10 3-10 3-3 10-3-10-10-3 10-3 3-10Z" fill="currentColor" fillOpacity=".32"/></svg>
               </div>
-              <div className="flex flex-col">
+              <div className={`flex flex-col ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                 <span className="font-headline-sm text-sm uppercase tracking-wider text-white font-bold leading-none">
                   NOVA
                 </span>
@@ -691,19 +701,20 @@ export default function App() {
                 </span>
               </div>
             </div>
-            <span className="font-label-tech text-[10px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium shadow-[0_0_10px_rgba(168,85,247,0.2)]">
+            {!sidebarCollapsed && <span className="font-label-tech text-[10px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium shadow-[0_0_10px_rgba(168,85,247,0.2)]">
               v2.4 Pro
-            </span>
+            </span>}
+            <button type="button" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-white/5 hover:text-white ${sidebarCollapsed ? 'border border-white/[.07] bg-white/[.03]' : ''}`}><ChevronRight size={15} className={sidebarCollapsed ? '' : 'rotate-180'}/></button>
           </div>
 
-          <div className="px-5 pt-5 pb-2 flex items-center justify-between">
+          <div className={`px-5 pt-5 pb-2 flex items-center justify-between ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
             <span className="font-label-tech text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
               Sovereign Terminal
             </span>
             <span className="h-1 w-1 rounded-full bg-cyan-400"></span>
           </div>
 
-          <nav className="px-3 flex flex-col gap-1">
+          <nav aria-label="Primary" className={`flex flex-col gap-1 ${sidebarCollapsed ? 'px-3 lg:px-2' : 'px-3'}`}>
             {NAV_ITEMS.map((item) => {
               const isActive = activeNav === item.id;
               return (
@@ -712,10 +723,12 @@ export default function App() {
                   type="button"
                   onClick={() => setActiveNav(item.id)}
                   aria-current={isActive ? 'page' : undefined}
+                  aria-label={sidebarCollapsed ? item.label : undefined}
+                  title={sidebarCollapsed ? item.label : undefined}
                   className={
                     isActive
-                      ? 'relative group flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600/30 via-purple-600/15 to-transparent text-white font-medium border border-purple-500/30 shadow-[0_0_20px_rgba(147,51,234,0.18)] transition-all duration-200 w-full text-left'
-                      : 'flex items-center gap-3 px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-white/[0.04] transition-all duration-150 font-body-md text-sm group w-full text-left'
+                      ? `relative group flex ${sidebarCollapsed ? 'items-center gap-3 px-3.5 text-left lg:justify-center lg:px-0' : 'items-center gap-3 px-3.5 text-left'} py-2.5 rounded-xl bg-gradient-to-r from-purple-600/30 via-purple-600/15 to-transparent text-white font-medium border border-purple-500/30 shadow-[0_0_20px_rgba(147,51,234,0.18)] transition-all duration-200 w-full`
+                      : `flex ${sidebarCollapsed ? 'items-center gap-3 px-3.5 text-left lg:justify-center lg:px-0' : 'items-center gap-3 px-3.5 text-left'} py-2 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-white/[0.04] transition-all duration-150 font-body-md text-sm group w-full`
                   }
                 >
                   {isActive && (
@@ -730,12 +743,12 @@ export default function App() {
                   </span>
                   <span
                     className={
-                      isActive ? 'font-body-md text-sm font-semibold tracking-tight' : ''
+                      `${isActive ? 'font-body-md text-sm font-semibold tracking-tight' : ''} ${sidebarCollapsed ? 'lg:hidden' : ''}`
                     }
                   >
                     {item.label}
                   </span>
-                  {item.badge && (
+                  {!sidebarCollapsed && item.badge && (
                     <span className="ml-auto font-label-tech text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/30">
                       {item.badge}
                     </span>
@@ -750,24 +763,24 @@ export default function App() {
         <div
           onClick={() => void handleSyncFromHeader()}
           title="Sync from the configured MT5 connector"
-          className="p-3 m-3 rounded-xl bg-gradient-to-b from-[#111420] to-[#0a0c12] border border-white/[0.08] shadow-[0_8px_20px_rgba(0,0,0,0.5)] relative overflow-hidden cursor-pointer hover:border-purple-500/40 transition-all group"
+          className={`relative m-3 cursor-pointer overflow-hidden rounded-xl border border-white/[0.08] bg-gradient-to-b from-[#111420] to-[#0a0c12] shadow-[0_8px_20px_rgba(0,0,0,0.5)] transition-all hover:border-purple-500/40 group ${sidebarCollapsed ? 'flex justify-center p-3' : 'p-3'}`}
         >
           <div className="absolute -right-6 -bottom-6 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none"></div>
-          <div className="flex items-center justify-between mb-2">
+          <div className={`mb-2 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
             <div className="flex items-center gap-2">
               <span className="relative flex h-2 w-2">
                 <span className={`absolute inline-flex h-full w-full rounded-full opacity-80 ${linkState === 'CONNECTED' ? 'animate-ping' : ''} ${dotCls}`}></span>
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${dotCls}`}></span>
               </span>
-              <span className={`font-label-tech text-[10px] font-bold uppercase tracking-wider ${chipCls.split(' ').pop()}`}>
+              {!sidebarCollapsed && <span className={`font-label-tech text-[10px] font-bold uppercase tracking-wider ${chipCls.split(' ').pop()}`}>
                 {linkLabel}
-              </span>
+              </span>}
             </div>
-            <span className="font-label-numeric-sm text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-slate-400 font-medium">
+            {!sidebarCollapsed && <span className="font-label-numeric-sm text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-slate-400 font-medium">
               READ ONLY
-            </span>
+            </span>}
           </div>
-          <div className="mb-2 text-[11px] text-slate-400">
+          {!sidebarCollapsed && <><div className="mb-2 text-[11px] text-slate-400">
             {lastSyncedTime ? `Last data ${new Date(lastSyncedTime).toLocaleTimeString()}` : 'No data received yet'}
           </div>
           <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
@@ -776,12 +789,13 @@ export default function App() {
               {activeAccount.shortRef}
             </span>
           </div>
+          </>}
         </div>
       </aside>
 
       {/* Main Wrapper */}
-      <div className="lg:pl-64 xl:pr-[320px] relative z-10">
-        <header className="fixed top-0 left-0 lg:left-64 right-0 h-16 bg-[#08090e]/80 backdrop-blur-2xl z-40 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.07] shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+      <div className={`relative z-10 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-64'} xl:pr-[320px]`}>
+        <header className={`fixed top-0 right-0 h-16 bg-[#08090e]/80 backdrop-blur-2xl z-40 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.07] shadow-[0_4px_30px_rgba(0,0,0,0.5)] transition-[left] duration-200 ease-out ${sidebarCollapsed ? 'left-0 lg:left-[76px]' : 'left-0 lg:left-64'}`}>
           <div className="flex min-w-0 items-center gap-2">
           <button type="button" aria-label="Open menu" onClick={() => setMenuOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">menu</span></button>
           <div className="flex min-w-0 flex-col justify-center">

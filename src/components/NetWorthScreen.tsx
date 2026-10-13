@@ -141,9 +141,13 @@ export const NetWorthScreen: React.FC<Props> = ({ currency, goal, onGoalChange }
   };
 
   return (
-    <div className="flex flex-col gap-5 pb-20">
+    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-20">
+      <header className="flex flex-wrap items-end justify-between gap-3 px-1">
+        <div><p className="mb-2 flex items-center gap-2 font-label-tech text-[10px] uppercase tracking-[.22em] text-cyan-300"><span className="material-symbols-outlined text-sm">account_balance_wallet</span> Personal finance</p><h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Net Worth</h1><p className="mt-1 text-sm text-slate-400">A clear view of the assets and liabilities you choose to track.</p></div>
+        <button type="button" onClick={() => { setKind('asset'); setCat('cash'); setSheet(true); }} className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/20 bg-gradient-to-r from-cyan-500/15 to-violet-500/15 px-4 py-2.5 text-xs font-semibold text-cyan-100 transition hover:border-cyan-200/35 hover:from-cyan-500/20 hover:to-violet-500/20"><span className="material-symbols-outlined text-base">add</span>Add an item</button>
+      </header>
       <section className="hud-panel overflow-hidden p-5 sm:p-8">
-        <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-500/[.08] blur-3xl" />
         <p className="font-label-tech text-[11px] uppercase tracking-[0.3em] text-cyan-300">Total net worth</p>
         <p className="mt-2 break-words text-4xl font-bold tabular-nums text-white sm:text-6xl">{items ? fmt(shown) : '—'}</p>
         <p className={`mt-2 text-sm ${delta === null ? 'text-slate-500' : delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -157,9 +161,10 @@ export const NetWorthScreen: React.FC<Props> = ({ currency, goal, onGoalChange }
 
       {error && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error} <button className="ml-2 underline" onClick={() => void load()}>Retry</button></p>}
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-5">
-        <div className="hud-panel p-4 sm:p-5"><p className="text-xs text-slate-400">Assets</p><p className="mt-1 text-lg font-semibold tabular-nums text-emerald-300 sm:text-2xl">{fmt(t.assets)}</p></div>
-        <div className="hud-panel p-4 sm:p-5"><p className="text-xs text-slate-400">Liabilities</p><p className="mt-1 text-lg font-semibold tabular-nums text-rose-300 sm:text-2xl">{fmt(t.debts)}</p></div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-5">
+        <div className="hud-panel p-4 sm:p-5"><p className="text-xs text-slate-400">Total assets</p><p className="mt-1 text-lg font-semibold tabular-nums text-emerald-300 sm:text-2xl">{items ? fmt(t.assets) : '—'}</p><p className="mt-1 text-[10px] text-slate-600">Manually tracked asset records</p></div>
+        <div className="hud-panel p-4 sm:p-5"><p className="text-xs text-slate-400">Total liabilities</p><p className="mt-1 text-lg font-semibold tabular-nums text-rose-300 sm:text-2xl">{items ? fmt(t.debts) : '—'}</p><p className="mt-1 text-[10px] text-slate-600">Manually tracked liability records</p></div>
+        <div className="hud-panel p-4 sm:p-5"><p className="text-xs text-slate-400">Net worth</p><p className="mt-1 text-lg font-semibold tabular-nums text-white sm:text-2xl">{items ? fmt(net) : '—'}</p><p className="mt-1 text-[10px] text-slate-600">Assets minus liabilities · {currency}</p></div>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -193,10 +198,6 @@ export const NetWorthScreen: React.FC<Props> = ({ currency, goal, onGoalChange }
       {items?.length === 0 && <div className="hud-panel p-8 text-center"><p className="text-white">Nothing tracked yet</p><p className="mt-1 text-sm text-slate-400">Add your cash, devices, vehicles and debts to see your real net worth.</p></div>}
       {t.a.length > 0 && <div className="flex flex-col gap-3"><h2 className="font-label-tech text-[11px] uppercase tracking-[0.25em] text-slate-400">Assets</h2>{t.a.map(([c, l]) => Group(c, l, 'a'))}</div>}
       {t.l.length > 0 && <div className="flex flex-col gap-3"><h2 className="font-label-tech text-[11px] uppercase tracking-[0.25em] text-slate-400">Liabilities</h2>{t.l.map(([c, l]) => Group(c, l, 'l'))}</div>}
-
-      <button onClick={() => { setKind('asset'); setCat('cash'); setSheet(true); }} className="fixed bottom-24 right-5 z-30 flex h-14 items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-violet-600 px-5 font-semibold text-white shadow-[0_8px_30px_rgba(34,211,238,.35)] transition hover:scale-105 active:scale-95 lg:bottom-8 lg:right-8">
-        <span className="material-symbols-outlined">add</span>Add
-      </button>
 
       {sheet && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center" onClick={() => setSheet(false)}>
