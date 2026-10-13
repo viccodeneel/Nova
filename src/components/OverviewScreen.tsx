@@ -14,6 +14,7 @@ interface OverviewScreenProps {
   onNavigateToFinance: () => void;
   onNavigateToSettings: () => void;
   onSelectAccount: (accountId: string) => void;
+  onOpenAccountDetails: (accountId: string) => void;
 }
 
 type Range = '7d' | '30d' | 'all';
@@ -56,7 +57,7 @@ const MiniLine: React.FC<{ trades: TradeExecution[]; color?: string }> = ({ trad
   return <svg viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true" className="h-8 w-full"><polyline points={points} fill="none" stroke={color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 };
 
-export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, accounts, trades, onSync, onOpenImportModal, onNavigateToJournal, onNavigateToAccounts, onNavigateToAnalytics, onNavigateToFinance, onNavigateToSettings, onSelectAccount }) => {
+export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, accounts, trades, onSync, onOpenImportModal, onNavigateToJournal, onNavigateToAccounts, onNavigateToAnalytics, onNavigateToFinance, onNavigateToSettings, onSelectAccount, onOpenAccountDetails }) => {
   const [range, setRange] = useState<Range>('all');
   const accountTrades = trades.filter((trade) => trade.accountId === activeAccount.id);
   const closedTrades = accountTrades.filter((trade) => trade.outcome === 'WIN' || trade.outcome === 'LOSS' || trade.outcome === 'BE');
@@ -105,7 +106,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
           const accountClosed = trades.filter((trade) => trade.accountId === account.id && ['WIN', 'LOSS', 'BE'].includes(trade.outcome));
           return <button type="button" key={account.id} aria-pressed={selected} onClick={() => onSelectAccount(account.id)} className={`overview-account-row ${selected ? 'selected' : ''}`}>
             <span className="account-mark" style={{ '--account-accent': accountColor[index % accountColor.length] } as React.CSSProperties}>{account.name.slice(0, 1).toUpperCase()}</span>
-            <span className="account-row-name"><strong>{account.name}</strong><small>{[account.provider, account.accountType, account.phaseConfigured ? account.phase : undefined].filter(Boolean).join(' · ') || account.shortRef}</small></span>
+            <span className="account-row-name"><strong>{account.name}</strong><small>{[account.provider, account.classification?.replaceAll('_', ' '), account.classification === 'PROP_FIRM' && account.phaseConfigured ? account.phase : undefined].filter(Boolean).join(' · ') || account.shortRef}</small></span>
             <span className="account-row-state"><i className={`status-dot ${account.isRealConnected ? 'is-online' : ''}`} />{account.isRealConnected ? 'Live' : 'Offline'}</span>
             <span className="account-row-value"><strong>{money(account.currentBalance, account.currency)}</strong><small>{accountClosed.length} trades</small></span>
           </button>;
@@ -132,13 +133,13 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
         const closed = accountTrades.filter((trade) => ['WIN', 'LOSS', 'BE'].includes(trade.outcome));
         const pnl = closed.reduce((total, trade) => total + (Number(trade.pnlValue) || 0), 0);
         return <article key={account.id} className={`overview-account-card ${account.id === activeAccount.id ? 'active' : ''}`}>
-          <div className="account-card-top"><span className="account-mark" style={{ '--account-accent': accountColor[index % accountColor.length] } as React.CSSProperties}>{account.name.slice(0, 1).toUpperCase()}</span><span className={`account-type-pill ${account.isRealConnected ? 'connected' : ''}`}>{account.accountType || (account.isRealConnected ? 'CONNECTED' : 'OFFLINE')}</span><button type="button" aria-label={`View ${account.name}`} onClick={() => onSelectAccount(account.id)}><ArrowUpRightFromSquare size={15}/></button></div>
+          <div className="account-card-top"><span className="account-mark" style={{ '--account-accent': accountColor[index % accountColor.length] } as React.CSSProperties}>{account.name.slice(0, 1).toUpperCase()}</span><span className={`account-type-pill ${account.isRealConnected ? 'connected' : ''}`}>{account.classification === 'LIVE_BROKERAGE' ? 'LIVE BROKERAGE' : account.classification === 'DEMO' ? 'DEMO' : account.classification === 'PROP_FIRM' ? 'PROP FIRM' : account.connectionStatus || 'UNCLASSIFIED'}</span><button type="button" aria-label={`View ${account.name}`} onClick={() => onOpenAccountDetails(account.id)}><ArrowUpRightFromSquare size={15}/></button></div>
           <p className="account-card-name">{account.name}</p><p className="account-card-meta">{[account.provider, account.shortRef].filter(Boolean).join(' · ')}</p>
           <strong className="account-card-balance">{money(account.currentBalance, account.currency)}</strong>
           <div className="account-card-pnl"><span className={pnl >= 0 ? 'positive' : 'negative'}>{money(pnl, account.currency)}</span><small>realized P&amp;L</small></div>
           <div className="account-card-chart"><MiniLine trades={accountTrades} color={accountColor[index % accountColor.length]} /></div>
           <div className="account-card-bottom"><span>{closed.length} trades</span><span>{account.phaseConfigured ? account.phase : 'Trading account'}</span></div>
-          <button type="button" className="account-details-button" onClick={() => onSelectAccount(account.id)}>View account details <ChevronRight size={14}/></button>
+          <button type="button" className="account-details-button" onClick={() => onOpenAccountDetails(account.id)}>View account details <ChevronRight size={14}/></button>
         </article>;
       }) : <div className="overview-panel empty-account-card"><p>Connect a supported account to see live account details here.</p><button type="button" onClick={onNavigateToAccounts}>Go to accounts <ChevronRight size={14}/></button></div>}
     </section>

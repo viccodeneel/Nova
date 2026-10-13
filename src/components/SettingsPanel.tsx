@@ -30,7 +30,7 @@ const Msg: React.FC<{ m: { ok: boolean; t: string } | null }> = ({ m }) => m ? <
 
 interface Props {
   profile: Profile; onProfileChange: (p: Profile) => void; accounts: PropAccount[];
-  onDeleteAccount: (id: string) => void | Promise<void>; onConnect: () => void; onSignOut?: () => void;
+  onDeleteAccount: (id: string) => unknown | Promise<unknown>; onConnect: () => void; onSignOut?: () => void;
   wake?: { supported: boolean; enabled: boolean; status: string; onChange: (on: boolean) => void };
 }
 
@@ -169,7 +169,7 @@ export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accou
         <Msg m={sm} />
       </Card>
 
-      <Card title="MT5 accounts" hint="Read-only connections. Removing an account deletes its synced positions and trades from NOVA, not from your broker.">
+      <Card title="MT5 accounts" hint="Read-only connections. Removing an account archives its NOVA association and preserves synced trading history. It does not affect the external account.">
         {accounts.length === 0 && <p className="text-sm text-slate-500">No MT5 accounts connected.</p>}
         <ul className="divide-y divide-white/5">
           {accounts.map((a) => (

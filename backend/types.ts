@@ -12,6 +12,7 @@ export interface MT5AccountSnapshot {
   leverage?: number;
   connection_status?: 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'ERROR';
   data_mode?: 'MT5' | 'SIMULATED';
+  account_mode?: 'REAL' | 'DEMO' | 'CONTEST';
 }
 
 export interface MT5PositionSnapshot {
@@ -144,6 +145,9 @@ export interface TradingAccountRecord {
   broker_name: string;
   server_name: string;
   account_type: string;
+  connection_mode?: 'REAL' | 'DEMO' | 'CONTEST' | null;
+  owner_id?: string;
+  account_settings?: AccountSettings;
   currency: string;
   leverage: number;
   starting_balance: number;
@@ -162,4 +166,24 @@ export interface TradingAccountRecord {
   prop_phase?: PropPhaseConfig;
   positions_count?: number;
   trades_count?: number;
+}
+
+export type AccountClassification = 'LIVE_BROKERAGE' | 'PROP_FIRM' | 'DEMO';
+export type ChallengeType = 'ONE_STEP' | 'TWO_STEP' | 'INSTANT_FUNDING';
+export type ChallengeStage = 'PHASE_1' | 'PHASE_2' | 'FUNDED' | 'INSTANT_FUNDED' | 'EVALUATION';
+export interface AccountSettings {
+  classification?: AccountClassification;
+  notes?: string | null;
+  prop_firm_name?: string | null;
+  challenge?: {
+    type?: ChallengeType | null;
+    stage?: ChallengeStage | null;
+    fee?: number | null;
+    size?: number | null;
+    phase1_target_percent?: number | null;
+    phase2_target_percent?: number | null;
+    daily_drawdown_percent?: number | null;
+    max_drawdown_percent?: number | null;
+    minimum_trading_days?: number | null;
+  };
 }

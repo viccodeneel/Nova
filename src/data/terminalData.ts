@@ -54,6 +54,10 @@ export interface PropAccount {
   currency?: string;
   provider?: string;
   accountType?: string;
+  connectionMode?: 'REAL' | 'DEMO' | 'CONTEST' | null;
+  classification?: AccountClassification;
+  accountSettings?: AccountSettings;
+  connectionStatus?: string;
   phaseConfigured?: boolean;
   targetConfigured?: boolean;
   ref: string;
@@ -76,8 +80,27 @@ export interface PropAccount {
   peakWater: number;
   status: 'SAFE' | 'CAUTION' | 'FUNDED';
   isRealConnected?: boolean;
-  connectionStatus?: string;
   tradeCount?: number;
+}
+
+export type AccountClassification = 'LIVE_BROKERAGE' | 'PROP_FIRM' | 'DEMO';
+export type ChallengeType = 'ONE_STEP' | 'TWO_STEP' | 'INSTANT_FUNDING';
+export type ChallengeStage = 'PHASE_1' | 'PHASE_2' | 'FUNDED' | 'INSTANT_FUNDED' | 'EVALUATION';
+export interface AccountSettings {
+  classification?: AccountClassification;
+  notes?: string | null;
+  prop_firm_name?: string | null;
+  challenge?: {
+    type?: ChallengeType | null;
+    stage?: ChallengeStage | null;
+    fee?: number | null;
+    size?: number | null;
+    phase1_target_percent?: number | null;
+    phase2_target_percent?: number | null;
+    daily_drawdown_percent?: number | null;
+    max_drawdown_percent?: number | null;
+    minimum_trading_days?: number | null;
+  };
 }
 
 export interface DlmRule {

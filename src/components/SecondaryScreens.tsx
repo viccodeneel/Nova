@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AI_RESPONSES,
   DlmRule,
@@ -6,6 +6,7 @@ import {
   PropAccount,
   TradeExecution,
 } from '../data/terminalData';
+import { AccountSettingsModal } from './AccountSettingsModal';
 
 /* ================= ANALYTICS SCREEN ================= */
 export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades }) => {
@@ -243,7 +244,12 @@ export const AccountsScreen: React.FC<{
   trades: TradeExecution[];
   onSelectAccount: (id: string) => void;
   onOpenConnectModal: () => void;
-  onDeleteAccount: (id: string) => void;
+  onDeleteAccount: (id: string, confirmed?: boolean) => boolean | Promise<boolean>;
+  onUpdateAccount: (id: string, payload: { account_name: string; account_settings: Record<string, unknown> }) => Promise<void>;
+  editAccountId?: string | null;
+  onEditAccountHandled?: () => void;
+  openDetailsAccountId?: string | null;
+  onDetailsHandled?: () => void;
   onSyncPastTrades: (id: string, count?: number) => Promise<void> | void;
   onOpenImportModal?: (account: PropAccount) => void;
   onNavigateToJournal?: (accountId?: string) => void;
@@ -254,22 +260,50 @@ export const AccountsScreen: React.FC<{
   onSelectAccount,
   onOpenConnectModal,
   onDeleteAccount,
+  onUpdateAccount,
+  editAccountId,
+  onEditAccountHandled,
+  openDetailsAccountId,
+  onDetailsHandled,
   onSyncPastTrades,
   onOpenImportModal,
   onNavigateToJournal,
 }) => {
   const [accountToDelete, setAccountToDelete] = useState<PropAccount | null>(null);
   const [inspectingAccount, setInspectingAccount] = useState<PropAccount | null>(null);
+  const [detailsAccountId, setDetailsAccountId] = useState<string | null>(null);
+  const [editingAccount, setEditingAccount] = useState<PropAccount | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
 
   const totalAllocation = accounts.reduce((acc, a) => acc + a.baseBalance, 0);
 
-  const handleConfirmDelete = () => {
-    if (accountToDelete) {
-      onDeleteAccount(accountToDelete.id);
-      setAccountToDelete(null);
+  const handleConfirmDelete = async () => {
+    if (accountToDelete && !deleting) {
+      setDeleting(true);
+      try {
+      const removed = await onDeleteAccount(accountToDelete.id, true);
+      if (removed) {
+        setAccountToDelete(null);
+        setDetailsAccountId(null);
+      }
+      } finally {
+        setDeleting(false);
+      }
     }
   };
+
+  useEffect(() => {
+    if (!editAccountId) return;
+    const match = accounts.find((account) => account.id === editAccountId);
+    if (match) setEditingAccount(match);
+    onEditAccountHandled?.();
+  }, [editAccountId, accounts]);
+  useEffect(() => {
+    if (!openDetailsAccountId) return;
+    if (accounts.some((account) => account.id === openDetailsAccountId)) setDetailsAccountId(openDetailsAccountId);
+    onDetailsHandled?.();
+  }, [openDetailsAccountId, accounts]);
 
   const handleSyncDeals = async (accId: string, count: number = 5) => {
     setSyncingAccountId(accId);
@@ -368,8 +402,9 @@ export const AccountsScreen: React.FC<{
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <span className="font-label-tech text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 uppercase font-bold">
-                        {acc.phase}
+                        {acc.classification === 'LIVE_BROKERAGE' ? 'LIVE BROKERAGE' : acc.classification === 'DEMO' ? 'DEMO' : 'PROP FIRM'}
                       </span>
+                      {acc.classification === 'PROP_FIRM' && acc.accountSettings?.challenge?.stage && <span className="font-label-tech text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-200 border border-cyan-400/20 uppercase font-bold">{acc.accountSettings.challenge.stage.replaceAll('_', ' ')}</span>}
                       {isActive && (
                         <span className="font-label-tech text-[10px] px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold">
                           ACTIVE TERMINAL
@@ -383,7 +418,7 @@ export const AccountsScreen: React.FC<{
                         e.stopPropagation();
                         setAccountToDelete(acc);
                       }}
-                      title="Delete this MT5 account"
+                      title="Remove this account from NOVA"
                       className="w-8 h-8 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/25 hover:border-rose-500/50 text-rose-300 flex items-center justify-center transition-all opacity-80 group-hover:opacity-100"
                     >
                       <span className="material-symbols-outlined text-[16px]">delete</span>
@@ -399,7 +434,7 @@ export const AccountsScreen: React.FC<{
                       {acc.name}
                     </h3>
                     <span className="font-label-numeric-sm text-xs text-slate-400 block mt-0.5">
-                      {acc.ref} • {acc.bridge}
+                      {acc.ref} • {acc.provider || acc.bridge}
                     </span>
                   </div>
 
@@ -496,7 +531,7 @@ export const AccountsScreen: React.FC<{
                   <div className="flex items-center gap-2 pt-2 border-t border-white/[0.06]">
                     <button
                       type="button"
-                      onClick={() => onSelectAccount(acc.id)}
+                      onClick={() => setDetailsAccountId(acc.id)}
                       className={`flex-1 py-1.5 px-2 rounded-lg font-label-tech text-xs font-bold transition-all text-center ${
                         isActive
                           ? 'bg-purple-600/30 border border-purple-500/40 text-purple-200'
@@ -504,6 +539,10 @@ export const AccountsScreen: React.FC<{
                       }`}
                     >
                       {isActive ? 'Active Terminal' : 'Set as Active'}
+                    </button>
+
+                    <button type="button" onClick={() => setEditingAccount(acc)} className="py-1.5 px-2.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-200 font-label-tech text-xs font-bold flex items-center gap-1 transition-all" aria-label={`Edit ${acc.name}`}>
+                      <span className="material-symbols-outlined text-sm">edit</span><span>Edit</span>
                     </button>
 
                     <button
@@ -546,10 +585,10 @@ export const AccountsScreen: React.FC<{
               </div>
               <div>
                 <h3 className="font-headline-sm text-base font-bold text-white">
-                  Delete MT5 Account?
+                  Remove account from NOVA?
                 </h3>
                 <span className="font-label-tech text-[10px] text-rose-400">
-                  PERMANENT REMOVAL OF UNNEEDED ACCOUNT
+                  ARCHIVE LOCAL ACCOUNT ASSOCIATION
                 </span>
               </div>
             </div>
@@ -558,13 +597,14 @@ export const AccountsScreen: React.FC<{
               Are you sure you want to delete <strong className="text-white font-bold">{accountToDelete.name}</strong> ({accountToDelete.ref})?
             </p>
             <p className="font-body-sm text-[11px] text-slate-400 mb-6 bg-white/[0.02] p-3 rounded-xl border border-white/[0.06]">
-              All logged trades, audit notes, and equity curve points associated with this MT5 account ID will be permanently removed from your dashboard.
+              This hides the account from NOVA and marks its local connection as disconnected. Existing trade history and financial records are preserved. This does not close or change your external brokerage account.
             </p>
 
             <div className="flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setAccountToDelete(null)}
+                disabled={deleting}
                 className="px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-body-sm transition-all"
               >
                 Cancel
@@ -572,15 +612,39 @@ export const AccountsScreen: React.FC<{
               <button
                 type="button"
                 onClick={handleConfirmDelete}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-label-tech text-xs font-bold transition-all shadow-[0_0_15px_rgba(244,63,94,0.4)] flex items-center gap-1.5"
+                disabled={deleting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-label-tech text-xs font-bold transition-all shadow-[0_0_15px_rgba(244,63,94,0.4)] flex items-center gap-1.5 disabled:cursor-wait disabled:opacity-60"
               >
                 <span className="material-symbols-outlined text-sm">delete_forever</span>
-                <span>Confirm Delete Account</span>
+                <span>{deleting ? 'Removing…' : 'Remove from NOVA'}</span>
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {detailsAccountId && (() => {
+        const detail = accounts.find((account) => account.id === detailsAccountId);
+        if (!detail) return null;
+        const challenge = detail.accountSettings?.challenge;
+        const detailTrades = trades.filter((trade) => trade.accountId === detail.id && ['WIN', 'LOSS', 'BE'].includes(trade.outcome));
+        const detailRealized = detailTrades.reduce((sum, trade) => sum + (Number(trade.pnlValue) || 0), 0);
+        const category = detail.classification === 'LIVE_BROKERAGE' ? 'LIVE BROKERAGE' : detail.classification === 'DEMO' ? 'DEMO' : 'PROP FIRM';
+        return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsAccountId(null); }}>
+          <section className="terminal-glass max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-blue-300/15 p-5 shadow-2xl sm:p-7" role="dialog" aria-modal="true" aria-label={`${detail.name} details`}>
+            <div className="flex items-start justify-between gap-3 border-b border-white/[.08] pb-4"><div><p className="font-label-tech text-[10px] uppercase tracking-[.2em] text-violet-300">Account details</p><h2 className="mt-1 text-xl font-semibold text-white">{detail.name}</h2><div className="mt-2 flex flex-wrap gap-2"><span className="rounded-full border border-violet-400/25 bg-violet-400/10 px-2.5 py-1 text-[10px] font-bold text-violet-200">{category}</span>{category === 'PROP FIRM' && challenge?.stage && <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-bold text-cyan-200">{challenge.stage.replaceAll('_', ' ')}</span>}</div></div><button type="button" onClick={() => setDetailsAccountId(null)} aria-label="Close account details" className="rounded-lg border border-white/10 px-3 py-2 text-slate-400">×</button></div>
+            <div className="grid gap-3 py-4 sm:grid-cols-2">{[
+              ['Provider', detail.provider || 'Unavailable'], ['Account ID', detail.shortRef], ['Connection', detail.connectionStatus || 'Unavailable'], ['MT5 mode', detail.connectionMode || 'Not supplied by connector'], ['Current balance', `${detail.currency || ''} ${detail.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Current equity', `${detail.currency || ''} ${detail.liveEquity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Original starting balance', `${detail.currency || ''} ${detail.baseBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Balance change since start', `${detail.currency || ''} ${detail.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Recorded closed trades', detail.tradeCount ?? detailTrades.length], ['Recorded realized P&L', `${detail.currency || ''} ${detailRealized.toLocaleString('en-US', { minimumFractionDigits: 2 })}`],
+            ].map(([label, value]) => <div key={label} className="rounded-xl border border-white/[.07] bg-black/15 p-3"><span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span><strong className="mt-1 block break-words text-sm text-slate-100">{value}</strong></div>)}</div>
+            {category === 'PROP FIRM' && <div className="mb-4 rounded-xl border border-violet-400/15 bg-violet-400/[.025] p-4"><h3 className="text-sm font-semibold text-white">Configured challenge settings</h3><p className="mt-1 text-[11px] text-slate-400">User-provided references only; NOVA does not verify or enforce the firm's rules.</p><div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-300 sm:grid-cols-3">{[
+              ['Firm', detail.accountSettings?.prop_firm_name || detail.provider || 'Not configured'], ['Type', challenge?.type?.replaceAll('_', ' ') || 'Not configured'], ['Stage', challenge?.stage?.replaceAll('_', ' ') || 'Not configured'], ['Challenge size', challenge?.size != null ? `${detail.currency || ''} ${challenge.size}` : 'Not configured'], ['Purchase fee', challenge?.fee != null ? `${detail.currency || ''} ${challenge.fee}` : 'Not configured'], ['Phase 1 target', challenge?.phase1_target_percent != null ? `${challenge.phase1_target_percent}%` : 'Not configured'], ['Phase 2 target', challenge?.phase2_target_percent != null ? `${challenge.phase2_target_percent}%` : 'Not configured'], ['Daily drawdown', challenge?.daily_drawdown_percent != null ? `${challenge.daily_drawdown_percent}%` : 'Not configured'], ['Max drawdown', challenge?.max_drawdown_percent != null ? `${challenge.max_drawdown_percent}%` : 'Not configured'],
+            ].map(([label, value]) => <p key={label}><span className="block text-[9px] uppercase tracking-wider text-slate-500">{label}</span><strong className="mt-1 block">{value}</strong></p>)}</div></div>}
+            {detail.accountSettings?.notes && <p className="mb-4 rounded-xl border border-white/[.07] p-3 text-sm text-slate-300">{detail.accountSettings.notes}</p>}
+            <div className="flex flex-wrap justify-between gap-3 border-t border-white/[.08] pt-4"><button type="button" onClick={() => { setAccountToDelete(detail); setDetailsAccountId(null); }} className="rounded-lg border border-rose-500/25 px-4 py-2.5 text-sm text-rose-200">Remove Account</button><div className="ml-auto flex gap-2"><button type="button" onClick={() => setDetailsAccountId(null)} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300">Close</button><button type="button" onClick={() => { setEditingAccount(detail); setDetailsAccountId(null); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white">Edit Account</button></div></div>
+          </section>
+        </div>;
+      })()}
+      {editingAccount && <AccountSettingsModal account={editingAccount} onClose={() => setEditingAccount(null)} onSave={onUpdateAccount} />}
 
       {/* ================= PAST TRADES INSPECTOR MODAL ================= */}
       {inspectingAccount && (

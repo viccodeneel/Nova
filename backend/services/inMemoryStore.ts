@@ -12,7 +12,7 @@ class InMemoryStore {
   private deals: Map<string, MT5DealSnapshot[]> = new Map();
   private trades: Map<string, LogicalTrade[]> = new Map();
   public async getAllAccounts(): Promise<TradingAccountRecord[]> {
-    return Array.from(this.accounts.values());
+    return Array.from(this.accounts.values()).filter((account) => account.is_active !== false);
   }
 
   public async getAccount(id: string): Promise<TradingAccountRecord | null> {
@@ -20,19 +20,27 @@ class InMemoryStore {
   }
 
   public async createAccount(acc: TradingAccountRecord): Promise<TradingAccountRecord> {
-    this.accounts.set(acc.id, acc);
+    const owned = { ...acc, owner_id: acc.owner_id || 'nova-owner', account_settings: acc.account_settings || {} };
+    this.accounts.set(acc.id, owned);
     if (!this.positions.has(acc.id)) this.positions.set(acc.id, []);
     if (!this.deals.has(acc.id)) this.deals.set(acc.id, []);
     if (!this.trades.has(acc.id)) this.trades.set(acc.id, []);
-    return acc;
+    return owned;
   }
 
   public async deleteAccount(id: string): Promise<boolean> {
-    const existed = this.accounts.delete(id);
-    this.positions.delete(id);
-    this.deals.delete(id);
-    this.trades.delete(id);
-    return existed;
+    const account = this.accounts.get(id);
+    if (!account || account.is_active === false) return false;
+    this.accounts.set(id, { ...account, is_active: false });
+    return true;
+  }
+
+  public async updateAccount(id: string, patch: Partial<TradingAccountRecord>): Promise<TradingAccountRecord | null> {
+    const account = this.accounts.get(id);
+    if (!account || account.is_active === false) return null;
+    const updated = { ...account, ...patch };
+    this.accounts.set(id, updated);
+    return updated;
   }
 
   public async getPositions(accountId: string): Promise<MT5PositionSnapshot[]> {
@@ -79,7 +87,8 @@ class InMemoryStore {
     accountSnapshot: MT5AccountSnapshot,
     positions: MT5PositionSnapshot[],
     deals: MT5DealSnapshot[],
-    logicalTrades: LogicalTrade[]
+    logicalTrades: LogicalTrade[],
+    allowReactivate = false
   ): void {
     let acc = this.accounts.get(accountId);
     if (!acc) {
@@ -90,6 +99,8 @@ class InMemoryStore {
         broker_name: accountSnapshot.broker_name,
         server_name: accountSnapshot.server_name,
         account_type: 'evaluation',
+        connection_mode: accountSnapshot.account_mode,
+        owner_id: 'nova-owner',
         currency: accountSnapshot.currency || 'USD',
         leverage: accountSnapshot.leverage || 100,
         starting_balance: accountSnapshot.balance,
@@ -119,6 +130,8 @@ class InMemoryStore {
       free_margin: accountSnapshot.free_margin || accountSnapshot.balance,
       margin_level: accountSnapshot.margin_level || 0,
       connection_status: 'CONNECTED',
+      connection_mode: accountSnapshot.account_mode || acc.connection_mode,
+      is_active: allowReactivate ? true : acc.is_active !== false,
       mt5_data_verified: true,
       last_synced_at: new Date().toISOString(),
       positions_count: positions.length,

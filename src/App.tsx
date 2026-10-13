@@ -64,18 +64,45 @@ function mapBackendAccount(account: any): PropAccount {
   const currentBalance = Number(account.current_balance || 0);
   const currentEquity = Number(account.current_equity || 0);
   const profitTarget = Number(account.prop_phase?.profit_target_amount ?? startingBalance * 0.06);
+  const storedSettings = account.account_settings || {};
+  const phaseName = String(account.prop_phase?.phase_name || '');
+  const legacyStage = /phase\s*2/i.test(phaseName) ? 'PHASE_2'
+    : /funded/i.test(phaseName) ? 'FUNDED'
+      : /phase\s*1|evaluation/i.test(phaseName) ? 'PHASE_1' : undefined;
+  const settings = {
+    ...storedSettings,
+    prop_firm_name: storedSettings.prop_firm_name ?? account.prop_firm?.prop_firm_name ?? null,
+    challenge: {
+      ...(storedSettings.challenge || {}),
+      stage: storedSettings.challenge?.stage ?? legacyStage,
+      size: storedSettings.challenge?.size ?? (account.prop_phase?.starting_balance != null ? Number(account.prop_phase.starting_balance) : null),
+      phase1_target_percent: storedSettings.challenge?.phase1_target_percent ?? (legacyStage !== 'PHASE_2' && account.prop_phase?.profit_target_percent != null ? Number(account.prop_phase.profit_target_percent) : null),
+      phase2_target_percent: storedSettings.challenge?.phase2_target_percent ?? (legacyStage === 'PHASE_2' && account.prop_phase?.profit_target_percent != null ? Number(account.prop_phase.profit_target_percent) : null),
+      daily_drawdown_percent: storedSettings.challenge?.daily_drawdown_percent ?? (account.prop_firm?.daily_loss_percent != null ? Number(account.prop_firm.daily_loss_percent) : null),
+      max_drawdown_percent: storedSettings.challenge?.max_drawdown_percent ?? (account.prop_firm?.max_loss_percent != null ? Number(account.prop_firm.max_loss_percent) : null),
+      minimum_trading_days: storedSettings.challenge?.minimum_trading_days ?? (account.prop_phase?.minimum_trading_days != null ? Number(account.prop_phase.minimum_trading_days) : null),
+    },
+  };
+  const legacyClassification = account.connection_mode === 'DEMO' || (!account.connection_mode && account.account_type === 'demo')
+    ? 'DEMO'
+    : account.account_type === 'live_personal' && account.connection_mode !== 'DEMO'
+      ? 'LIVE_BROKERAGE'
+      : ['evaluation', 'funded'].includes(account.account_type) ? 'PROP_FIRM' : undefined;
   return {
     id: account.id,
     name: account.account_name,
     currency: typeof account.currency === 'string' ? account.currency : undefined,
     provider: typeof account.broker_name === 'string' ? account.broker_name : undefined,
     accountType: typeof account.account_type === 'string' ? account.account_type : undefined,
-    phaseConfigured: typeof account.prop_phase?.phase_name === 'string' && Boolean(account.prop_phase.phase_name),
+    connectionMode: account.connection_mode || null,
+    classification: settings.classification || legacyClassification,
+    accountSettings: settings,
+    phaseConfigured: Boolean(settings.challenge?.stage) || (typeof account.prop_phase?.phase_name === 'string' && Boolean(account.prop_phase.phase_name)),
     targetConfigured: account.prop_phase?.profit_target_amount != null || account.prop_phase?.profit_target_percent != null,
     ref: `#${account.account_number}-${(account.broker_name || '').slice(0, 2).toUpperCase()}`,
     shortRef: `${account.broker_name} #${account.account_number}`,
     bridge: account.server_name,
-    phase: account.prop_phase?.phase_name || 'Phase 1',
+    phase: settings.challenge?.stage?.replaceAll('_', ' ') || account.prop_phase?.phase_name || 'Phase 1',
     baseBalance: startingBalance,
     currentBalance,
     liveEquity: currentEquity,
@@ -110,6 +137,8 @@ export default function App() {
 
   const [activeAccountId, setActiveAccountId] = useState<string>('');
   const [isConnectAccountOpen, setIsConnectAccountOpen] = useState(false);
+  const [accountEditId, setAccountEditId] = useState<string | null>(null);
+  const [accountDetailsId, setAccountDetailsId] = useState<string | null>(null);
 
   const [trades, setTrades] = useState<TradeExecution[]>([]);
 
@@ -169,39 +198,7 @@ export default function App() {
     ApiClient.getAccounts().then((backendAccounts) => {
       if (backendAccounts) {
         const connectedAccounts = backendAccounts;
-        const mapped: PropAccount[] = connectedAccounts.map((a: any) => ({
-          id: a.id,
-          name: a.account_name,
-          ref: `#${a.account_number}-${(a.broker_name || 'FP').slice(0, 2).toUpperCase()}`,
-          shortRef: `${a.broker_name} #${a.account_number}`,
-          bridge: `${a.server_name} • LD4 Bridge`,
-          phase: a.prop_phase?.phase_name || 'Phase 1',
-          baseBalance: Number(a.starting_balance),
-          currentBalance: Number(a.current_balance),
-          liveEquity: Number(a.current_equity),
-          floatingPnl: Number((a.current_equity - a.current_balance).toFixed(2)),
-          netProfit: Number((a.current_balance - a.starting_balance).toFixed(2)),
-          roiPercent:
-            a.starting_balance > 0
-              ? Number(
-                  (((a.current_balance - a.starting_balance) / a.starting_balance) * 100).toFixed(2)
-                )
-              : 0,
-          targetProfit: Number(a.prop_phase?.profit_target_amount || a.starting_balance * 0.06),
-          targetPercent: Number(a.prop_phase?.profit_target_percent || 6),
-          passThreshold: Number(
-            a.starting_balance + (a.prop_phase?.profit_target_amount || a.starting_balance * 0.06)
-          ),
-          dailyLimit: Number(a.prop_firm?.daily_loss_limit || a.starting_balance * 0.05),
-          currentDailyDrawdown: Number(a.prop_firm?.current_daily_drawdown || 0),
-          maxLossLimit: Number(a.prop_firm?.max_loss_limit || a.starting_balance * 0.1),
-          currentMaxDrawdown: Number(a.prop_firm?.current_max_drawdown || 0),
-          peakWater: Number(a.prop_firm?.peak_watermark || a.starting_balance),
-          status: (a.prop_firm?.breach_status as any) || 'SAFE',
-          isRealConnected: a.connection_status === 'CONNECTED',
-    connectionStatus: a.connection_status,
-          tradeCount: a.trades_count || 0,
-        }));
+        const mapped = connectedAccounts.map(mapBackendAccount);
         setAccounts(mapped);
         setActiveAccountId(mapped[0]?.id || '');
         if (connectedAccounts[0]) {
@@ -456,20 +453,17 @@ export default function App() {
     }
   };
 
-  const handleDeleteAccount = async (accountId: string) => {
+  const handleDeleteAccount = async (accountId: string, confirmed = false): Promise<boolean> => {
     const target = accounts.find((a) => a.id === accountId);
-    if (!window.confirm(`Remove ${target?.name ?? 'this account'} from NOVA? Its synced positions and trades will be deleted.`)) return;
+    if (!confirmed && !window.confirm(`Remove ${target?.name ?? 'this account'} from NOVA? This archives the local account connection. Trading history is preserved, and the external trading account is not affected.`)) return false;
     const removed = await ApiClient.deleteAccount(accountId);
     if (!removed) {
-      setSyncToast({ success: false, message: 'Could not delete the account. Nothing was removed.' });
+      setSyncToast({ success: false, message: 'Could not remove the account. It remains available in NOVA.' });
       setTimeout(() => setSyncToast(null), 5000);
-      return;
+      return false;
     }
     const remaining = accounts.filter((a) => a.id !== accountId);
     setAccounts(remaining);
-    // Remove all trades associated with the deleted account
-    setTrades((prev) => prev.filter((t) => t.accountId !== accountId));
-
     if (activeAccountId === accountId) {
       if (remaining.length > 0) {
         setActiveAccountId(remaining[0].id);
@@ -477,6 +471,17 @@ export default function App() {
         setActiveAccountId('');
       }
     }
+    setSyncToast({ success: true, message: 'Account removed from NOVA. Existing trade records are preserved.' });
+    setTimeout(() => setSyncToast(null), 5000);
+    return true;
+  };
+
+  const handleUpdateAccount = async (accountId: string, payload: { account_name: string; account_settings: Record<string, unknown> }) => {
+    const updated = await ApiClient.updateAccount(accountId, payload);
+    const mapped = mapBackendAccount(updated);
+    setAccounts((current) => current.map((account) => account.id === accountId ? mapped : account));
+    setSyncToast({ success: true, message: `${mapped.name} settings saved.` });
+    setTimeout(() => setSyncToast(null), 4000);
   };
 
   const handleImportTrades = (importedTrades: TradeExecution[], newBalance?: number) => {
@@ -535,34 +540,7 @@ export default function App() {
         setLastSyncedTime(res.synced_at || new Date().toISOString());
         const backendAccounts = await ApiClient.getAccounts();
         const connectedAccounts = backendAccounts;
-        const mappedAccounts: PropAccount[] = connectedAccounts.map((a: any) => ({
-          id: a.id,
-          name: a.account_name,
-          ref: `#${a.account_number}-${(a.broker_name || '').slice(0, 2).toUpperCase()}`,
-          shortRef: `${a.broker_name} #${a.account_number}`,
-          bridge: a.server_name,
-          phase: a.prop_phase?.phase_name || 'Phase 1',
-          baseBalance: Number(a.starting_balance),
-          currentBalance: Number(a.current_balance),
-          liveEquity: Number(a.current_equity),
-          floatingPnl: Number((a.current_equity - a.current_balance).toFixed(2)),
-          netProfit: Number((a.current_balance - a.starting_balance).toFixed(2)),
-          roiPercent: a.starting_balance > 0
-            ? Number((((a.current_balance - a.starting_balance) / a.starting_balance) * 100).toFixed(2))
-            : 0,
-          targetProfit: Number(a.prop_phase?.profit_target_amount || 0),
-          targetPercent: Number(a.prop_phase?.profit_target_percent || 0),
-          passThreshold: Number(a.prop_phase?.pass_threshold || 0),
-          dailyLimit: Number(a.prop_firm?.daily_loss_limit || 0),
-          currentDailyDrawdown: Number(a.prop_firm?.current_daily_drawdown || 0),
-          maxLossLimit: Number(a.prop_firm?.max_loss_limit || 0),
-          currentMaxDrawdown: Number(a.prop_firm?.current_max_drawdown || 0),
-          peakWater: Number(a.prop_firm?.peak_watermark || 0),
-          status: (a.prop_firm?.breach_status as any) || 'SAFE',
-          isRealConnected: a.connection_status === 'CONNECTED',
-    connectionStatus: a.connection_status,
-          tradeCount: a.trades_count || 0,
-        }));
+        const mappedAccounts = connectedAccounts.map(mapBackendAccount);
         setAccounts(mappedAccounts);
         setActiveAccountId(
           mappedAccounts.find((a) => a.id === requestedAccountId)?.id || mappedAccounts[0]?.id || ''
@@ -1047,6 +1025,7 @@ export default function App() {
               onNavigateToFinance={() => setActiveNav('finance')}
               onNavigateToSettings={() => setActiveNav('settings')}
               onSelectAccount={(id) => setActiveAccountId(id)}
+              onOpenAccountDetails={(id) => { setActiveNav('accounts'); setIsConnectAccountOpen(false); setAccountDetailsId(id); }}
             />
           )}
 
@@ -1085,6 +1064,11 @@ export default function App() {
               }}
               onOpenConnectModal={() => setIsConnectAccountOpen(true)}
               onDeleteAccount={handleDeleteAccount}
+              onUpdateAccount={handleUpdateAccount}
+              editAccountId={accountEditId}
+              onEditAccountHandled={() => setAccountEditId(null)}
+              openDetailsAccountId={accountDetailsId}
+              onDetailsHandled={() => setAccountDetailsId(null)}
               onSyncPastTrades={(id) => handleSyncFromHeader(id)}
               onOpenImportModal={(acc) => {
                 setTargetImportAccount(acc);

@@ -152,6 +152,15 @@ class MT5Connector:
             raise RuntimeError(f"Failed to query mt5.account_info(): [{err_code}] {err_desc}")
 
         info = account_info._asdict()
+        trade_mode = info.get("trade_mode")
+        if trade_mode == getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", object()):
+            account_mode = "REAL"
+        elif trade_mode == getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", object()):
+            account_mode = "DEMO"
+        elif trade_mode == getattr(mt5, "ACCOUNT_TRADE_MODE_CONTEST", object()):
+            account_mode = "CONTEST"
+        else:
+            account_mode = None
 
         return {
             "account_number": int(info.get("login", self.login)),
@@ -167,6 +176,7 @@ class MT5Connector:
             "leverage": int(info.get("leverage", 100)),
             "connection_status": "CONNECTED",
             "data_mode": "MT5",
+            "account_mode": account_mode,
         }
 
     def get_open_positions(self) -> List[Dict[str, Any]]:

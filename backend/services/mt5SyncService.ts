@@ -171,6 +171,8 @@ export async function processMT5SyncPayload(
                free_margin = $5,
                margin_level = $6,
                connection_status = 'CONNECTED',
+               connection_mode = COALESCE($9, connection_mode),
+               is_active = CASE WHEN $10 IS TRUE THEN TRUE ELSE is_active END,
                mt5_data_verified = TRUE,
                last_synced_at = $7,
                updated_at = CURRENT_TIMESTAMP
@@ -184,6 +186,8 @@ export async function processMT5SyncPayload(
             account.margin_level || 0,
             syncedAt,
             targetDbId,
+            account.account_mode || null,
+            options.allowCreate === true,
           ]
         );
         if (!dbAcc!.rows[0].mt5_data_verified) {
@@ -230,8 +234,8 @@ export async function processMT5SyncPayload(
         const newAcc = await query<{ id: string }>(
           `INSERT INTO trading_accounts (
             account_name, account_number, broker_name, server_name, starting_balance,
-            current_balance, current_equity, free_margin, connection_status, mt5_data_verified, last_synced_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONNECTED', TRUE, $9)
+            current_balance, current_equity, free_margin, connection_status, connection_mode, mt5_data_verified, last_synced_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONNECTED', $10, TRUE, $9)
           RETURNING id`,
           [
             `${account.broker_name} #${account.account_number}`,
@@ -243,6 +247,7 @@ export async function processMT5SyncPayload(
             account.equity,
             account.free_margin || account.balance,
             syncedAt,
+            account.account_mode || null,
           ]
         );
         targetDbId = newAcc!.rows[0].id;
@@ -443,7 +448,7 @@ export async function processMT5SyncPayload(
         synced_at: syncedAt,
         error: 'ACCOUNT_NOT_REGISTERED',
       };
-    inMemoryStore.updateAccountSync(accountId, account, positions, deals, logicalTrades);
+    inMemoryStore.updateAccountSync(accountId, account, positions, deals, logicalTrades, options.allowCreate === true);
   }
 
   return {

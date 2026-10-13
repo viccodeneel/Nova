@@ -321,6 +321,18 @@ export class ApiClient {
     }
   }
 
+  public static async updateAccount(accountId: string, payload: { account_name: string; account_settings: Record<string, unknown> }): Promise<any> {
+    const res = await this.request(`${this.baseUrl}/accounts/${encodeURIComponent(accountId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.error || `Could not save account settings (HTTP ${res.status}).`);
+    return data.data;
+  }
+
   public static async updateTradeConfluences(
     tradeId: string,
     confluences: any

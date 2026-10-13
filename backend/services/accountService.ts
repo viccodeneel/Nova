@@ -14,7 +14,7 @@ export function withLiveStatus<T extends { last_synced_at?: any; connection_stat
   return { ...acc, connection_status: status, data_age_seconds: last ? Math.round(age / 1000) : null };
 }
 
-export async function getAccounts(): Promise<TradingAccountRecord[]> {
+export async function getAccounts(ownerId = 'nova-owner'): Promise<TradingAccountRecord[]> {
   if (isDatabaseConnected()) {
     const res = await query<TradingAccountRecord>(
       `SELECT a.*,
@@ -46,17 +46,18 @@ export async function getAccounts(): Promise<TradingAccountRecord[]> {
        FROM trading_accounts a
        LEFT JOIN prop_firm_accounts p ON p.trading_account_id = a.id
        LEFT JOIN prop_phases ph ON ph.prop_firm_account_id = p.id
-       WHERE a.mt5_data_verified IS TRUE
-       ORDER BY a.created_at ASC`
+       WHERE a.mt5_data_verified IS TRUE AND a.is_active IS TRUE AND a.owner_id = $1
+       ORDER BY a.created_at ASC`,
+      [ownerId]
     );
     return res ? res.rows.map(withLiveStatus) : [];
   }
 
   const accounts = await inMemoryStore.getAllAccounts();
-  return accounts.filter((account) => account.mt5_data_verified === true).map(withLiveStatus);
+  return accounts.filter((account) => account.mt5_data_verified === true && account.owner_id === ownerId && account.is_active !== false).map(withLiveStatus);
 }
 
-export async function getAccountById(id: string): Promise<TradingAccountRecord | null> {
+export async function getAccountById(id: string, ownerId = 'nova-owner'): Promise<TradingAccountRecord | null> {
   if (isDatabaseConnected() && isUuid(id)) {
     const res = await query<TradingAccountRecord>(
       `SELECT a.*,
@@ -88,14 +89,35 @@ export async function getAccountById(id: string): Promise<TradingAccountRecord |
        FROM trading_accounts a
        LEFT JOIN prop_firm_accounts p ON p.trading_account_id = a.id
        LEFT JOIN prop_phases ph ON ph.prop_firm_account_id = p.id
-       WHERE a.id = $1 AND a.mt5_data_verified IS TRUE`,
-      [id]
+       WHERE a.id = $1 AND a.mt5_data_verified IS TRUE AND a.is_active IS TRUE AND a.owner_id = $2`,
+      [id, ownerId]
     );
     return res && res.rows.length > 0 ? withLiveStatus(res.rows[0]) : null;
   }
 
   const account = await inMemoryStore.getAccount(id);
-  return account?.mt5_data_verified ? withLiveStatus(account) : null;
+  return account?.mt5_data_verified && account.owner_id === ownerId && account.is_active !== false ? withLiveStatus(account) : null;
+}
+
+export async function updateAccountSettings(
+  id: string,
+  ownerId: string,
+  patch: { account_name: string; account_settings: TradingAccountRecord['account_settings'] }
+): Promise<TradingAccountRecord | null> {
+  if (isDatabaseConnected() && isUuid(id)) {
+    const result = await query<TradingAccountRecord>(
+      `UPDATE trading_accounts
+       SET account_name = $1, account_settings = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 AND owner_id = $4 AND is_active IS TRUE AND mt5_data_verified IS TRUE
+       RETURNING *`,
+      [patch.account_name, JSON.stringify(patch.account_settings || {}), id, ownerId]
+    );
+    return result?.rows[0] ? withLiveStatus(result.rows[0]) : null;
+  }
+  const account = await inMemoryStore.getAccount(id);
+  if (!account || account.owner_id !== ownerId || account.is_active === false || !account.mt5_data_verified) return null;
+  const updated = await inMemoryStore.updateAccount(id, patch);
+  return updated ? withLiveStatus(updated) : null;
 }
 
 export async function createAccount(data: {
@@ -123,6 +145,8 @@ export async function createAccount(data: {
 
   const newAccount: TradingAccountRecord = {
     id: accountId,
+    owner_id: 'nova-owner',
+    account_settings: {},
     account_name: data.account_name,
     account_number: data.account_number,
     broker_name: data.broker_name,
@@ -241,13 +265,21 @@ export async function createAccount(data: {
 }
 
 export async function deleteAccount(id: string): Promise<boolean> {
-  let removed = false;
+  return archiveAccount(id, 'nova-owner');
+}
+
+export async function archiveAccount(id: string, ownerId = 'nova-owner'): Promise<boolean> {
   if (isDatabaseConnected() && isUuid(id)) {
-    const res = await query(`DELETE FROM trading_accounts WHERE id = $1 RETURNING id`, [id]);
-    removed = !!res && res.rows.length > 0;
+    const res = await query(
+      `UPDATE trading_accounts SET is_active = FALSE, connection_status = 'DISCONNECTED', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND owner_id = $2 AND is_active IS TRUE RETURNING id`,
+      [id, ownerId]
+    );
+    return !!res && res.rows.length > 0;
   }
-  const inMemory = await inMemoryStore.deleteAccount(id);
-  return removed || inMemory;
+  const account = await inMemoryStore.getAccount(id);
+  if (!account || account.owner_id !== ownerId) return false;
+  return inMemoryStore.deleteAccount(id);
 }
 
 export async function getAccountPositions(accountId: string): Promise<MT5PositionSnapshot[]> {

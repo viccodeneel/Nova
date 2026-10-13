@@ -85,6 +85,29 @@ export async function initializeDatabase(): Promise<boolean> {
       if (fs.existsSync(schemaPath)) {
         const schemaSql = fs.readFileSync(schemaPath, 'utf8');
         await client.query(schemaSql);
+        const migrationsPath = path.resolve(__dirname, 'migrations');
+        if (fs.existsSync(migrationsPath)) {
+          await client.query(`CREATE TABLE IF NOT EXISTS nova_schema_migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )`);
+          const migrations = fs.readdirSync(migrationsPath).filter((name) => name.endsWith('.sql')).sort();
+          for (const name of migrations) {
+            const applied = await client.query('SELECT 1 FROM nova_schema_migrations WHERE name = $1', [name]);
+            if (applied.rowCount) continue;
+            const migrationSql = fs.readFileSync(path.join(migrationsPath, name), 'utf8');
+            await client.query('BEGIN');
+            try {
+              await client.query(migrationSql);
+              await client.query('INSERT INTO nova_schema_migrations (name) VALUES ($1)', [name]);
+              await client.query('COMMIT');
+              console.log(`[PostgreSQL] Applied migration ${name}.`);
+            } catch (migrationError) {
+              await client.query('ROLLBACK');
+              throw migrationError;
+            }
+          }
+        }
         console.log('[PostgreSQL] Database schema verified and initialized successfully.');
         isConnected = true;
         return true;
