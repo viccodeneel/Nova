@@ -51,6 +51,11 @@ export interface Mt5BridgeConfig {
 export interface PropAccount {
   id: string;
   name: string;
+  currency?: string;
+  provider?: string;
+  accountType?: string;
+  phaseConfigured?: boolean;
+  targetConfigured?: boolean;
   ref: string;
   shortRef: string;
   bridge: string;

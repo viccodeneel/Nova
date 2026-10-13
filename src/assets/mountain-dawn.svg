@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700" fill="none">
+  <defs>
+    <linearGradient id="sky" x1="800" y1="0" x2="800" y2="700" gradientUnits="userSpaceOnUse"><stop stop-color="#311d69"/><stop offset=".42" stop-color="#151842"/><stop offset="1" stop-color="#080d1d"/></linearGradient>
+    <linearGradient id="peak" x1="800" y1="90" x2="800" y2="570" gradientUnits="userSpaceOnUse"><stop stop-color="#b79bff"/><stop offset=".36" stop-color="#493576"/><stop offset="1" stop-color="#101b3e"/></linearGradient>
+    <linearGradient id="snow" x1="790" y1="120" x2="790" y2="430" gradientUnits="userSpaceOnUse"><stop stop-color="#f4d8ff"/><stop offset="1" stop-color="#7488cf" stop-opacity=".06"/></linearGradient>
+    <radialGradient id="sun" cx="0" cy="0" r="1" gradientTransform="matrix(0 250 -450 0 1160 280)" gradientUnits="userSpaceOnUse"><stop stop-color="#ffbcf7" stop-opacity=".8"/><stop offset=".36" stop-color="#b64dff" stop-opacity=".25"/><stop offset="1" stop-color="#4328d7" stop-opacity="0"/></radialGradient>
+    <linearGradient id="lake" x1="800" y1="430" x2="800" y2="700" gradientUnits="userSpaceOnUse"><stop stop-color="#293b79" stop-opacity=".72"/><stop offset="1" stop-color="#070c19"/></linearGradient>
+  </defs>
+  <path fill="url(#sky)" d="M0 0h1600v700H0z"/><path fill="url(#sun)" d="M0 0h1600v700H0z"/>
+  <circle cx="1160" cy="283" r="52" fill="#ffd5ef" fill-opacity=".8"/>
+  <path fill="#151535" d="m0 430 174-108 108 63 194-178 125 129 148-192 104 102 143-146 154 171 115-92 137 104 198-126v543H0z"/>
+  <path fill="url(#peak)" d="m115 486 162-196 70 73 132-176 79 91 150-181 108 174 70-104 78 82 99-120 173 233 124-103 143 138v303H115z"/>
+  <path fill="url(#snow)" d="m479 278 132-181 50 83-44-25-37 44-29-9-37 50-35-12Zm229-6 70-104 38 41-32-10-27 34-25 1-24 38Zm237-30 73-87 63 89-39-32-30 27-31-18-36 21Z"/>
+  <path fill="#18214d" d="m0 483 194-91 147 64 185-127 133 113 159-102 148 96 199-117 119 76 154-64 166 86v283H0z"/>
+  <path fill="url(#lake)" d="M0 535c212-38 349-28 504-50 245-35 338-20 527 2 213 24 375-19 569-14v227H0z"/>
+  <g stroke="#93a8ff" stroke-opacity=".2"><path d="M740 535h622M842 557h490M948 580h368M1034 604h285M1120 629h210"/><path d="m1215 535 110 165M1172 535l82 165M1295 535l160 165"/></g>
+  <path fill="#080d1c" d="m0 586 219-86 115 34 156-56 120 48 127-41 139 55 106-39 131 54 124-54 112 51 151-81v229H0z"/>
+</svg>

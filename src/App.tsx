@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import {
   calculateAccountMetricsFromTrades,
   DEFAULT_MT5_CONFIG,
@@ -26,12 +27,6 @@ import { NovaOrbDock } from './components/NovaOrbDock';
 import { NetWorthScreen } from './components/NetWorthScreen';
 import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
 import { ApiClient } from './services/apiClient.ts';
-
-const NOVA_LOGO_URL =
-  'https://lh3.googleusercontent.com/aida/AEtjO1XD4M77xnZQ70lLOhQCpk4hkRgOgJJp6zz9laW3H4999RDhwAeVzvLfTUbDK75_X7-5ALD5sByWj1mU5nkTDdK96Wo8foIKfnXqBmzuQgF0Sykb0lU1tg876aDqbMq-Ka3G-UNjmHxFN6kc6N1XjSdk54h7lglg0BxkGpSg3o2PznK93dmd0_ZYrGbd8_VROMenmszQi5ny02R8nEe3E5433wiB70U5i2vqIP5MGwZDQrWCOTdG_vPojBjP';
-
-const VICCO_AVATAR_URL =
-  'https://lh3.googleusercontent.com/aida/AEtjO1URCEo8ipbiDSP4cwCoMr6kDWZV9kViK8ScCweXwvBK2b3B7WBjyR1UQiiWjBU6VHT_hRCpXlNrQhESqVPjQL0QJdUDYLblEJ2Od73oxDe_JtoOx3PLpkaPKLyCFWCSguw4f1IafJYPo3seaYMyV-tUYeE5D8aOP2YOmqEYhgul3NhJg6qEZ8Di8UKAaXknP8P_mRDZx3gt1oGPbuB_5zhZdJLlmcvzpcV1Vdd2MLIALEg9kfKUiWcnE-aP';
 
 const NAV_ITEMS: Array<{
   id: NavSection;
@@ -72,6 +67,11 @@ function mapBackendAccount(account: any): PropAccount {
   return {
     id: account.id,
     name: account.account_name,
+    currency: typeof account.currency === 'string' ? account.currency : undefined,
+    provider: typeof account.broker_name === 'string' ? account.broker_name : undefined,
+    accountType: typeof account.account_type === 'string' ? account.account_type : undefined,
+    phaseConfigured: typeof account.prop_phase?.phase_name === 'string' && Boolean(account.prop_phase.phase_name),
+    targetConfigured: account.prop_phase?.profit_target_amount != null || account.prop_phase?.profit_target_percent != null,
     ref: `#${account.account_number}-${(account.broker_name || '').slice(0, 2).toUpperCase()}`,
     shortRef: `${account.broker_name} #${account.account_number}`,
     bridge: account.server_name,
@@ -103,7 +103,7 @@ export default function App() {
   const [authToken, setAuthToken] = useState(() =>
     import.meta.env.DEV ? 'local-development' : sessionStorage.getItem('nova_session') || ''
   );
-  const [activeNav, setActiveNav] = useState<NavSection>('ai');
+  const [activeNav, setActiveNav] = useState<NavSection>('overview');
 
   // Load from localStorage or defaults
   const [accounts, setAccounts] = useState<PropAccount[]>([]);
@@ -638,37 +638,46 @@ export default function App() {
   );
 
   if (!activeAccount) {
-    const tabs: Array<[NavSection, string]> = [['ai', 'NOVA AI'], ['overview', 'Dashboard'], ['analytics', 'Analytics'], ['accounts', 'Accounts'], ['finance', 'Net Worth'], ['settings', 'Settings']];
     return (
-      <div className="min-h-screen bg-[#08090d] text-slate-100">
-        <div className="pointer-events-none fixed inset-0 overflow-hidden"><div className="absolute -top-40 left-1/4 h-[550px] w-[750px] rounded-full bg-purple-600/10 blur-[140px]" /><div className="absolute top-1/3 -right-24 h-[600px] w-[600px] rounded-full bg-cyan-500/[0.07] blur-[150px]" /></div>
-        <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#0a0c13]/80 px-4 backdrop-blur-xl sm:px-8">
-          <span className="font-bold tracking-[0.3em] text-white">NOVA</span>
-          <nav className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
-            {tabs.map(([id, label]) => (
-              <button key={id} type="button" onClick={() => { setActiveNav(id); setIsConnectAccountOpen(id === 'accounts'); }} className={`rounded-lg px-3 py-2 text-sm transition-all duration-200 ${activeNav === id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>{label}</button>
-            ))}
-          </nav>
-        </header>
-        <main className="relative mx-auto w-full max-w-6xl p-5 sm:p-8">
-          <div key={activeNav} className="nova-enter">
-            {activeNav === 'accounts' ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} />
-              : activeNav === 'ai' ? <AiScreen mt5="NONE" name={profile.display_name} nova={nova} livekit={livekitVoice} />
-              : activeNav === 'finance' ? <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />
-              : activeNav === 'settings' ? <SettingsPanel wake={wakeProps} profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />
-              : activeNav === 'analytics' ? <AnalyticsScreen trades={trades} />
-              : (
-                <section className="hud-panel p-8 sm:p-12">
-                  <p className="font-label-tech text-xs uppercase tracking-[0.3em] text-cyan-300">{backendDown ? 'Backend unreachable' : 'No MT5 account connected'}</p>
-                  <h1 className="mt-3 text-2xl font-bold text-white">{greeting}{profile.display_name ? `, ${profile.display_name}` : ''}</h1>
-                  <p className="mt-2 max-w-xl text-sm text-slate-400">Trading data appears here once an MT5 account is connected. Nothing is shown until it comes from a real account.</p>
-                  <button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="mt-6 rounded-lg bg-gradient-to-r from-cyan-500 to-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Connect an account</button>
-                </section>
-              )}
+      <div className="min-h-screen bg-[#050812] text-slate-100 antialiased">
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden"><div className="absolute -top-40 left-1/4 h-[550px] w-[750px] rounded-full bg-violet-600/[0.08] blur-[140px]"/><div className="absolute top-1/3 -right-24 h-[600px] w-[600px] rounded-full bg-cyan-500/[0.05] blur-[150px]"/></div>
+        {menuOpen && <div className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />}
+        <aside className={`fixed left-0 top-0 z-50 flex h-full w-64 flex-col justify-between border-r border-blue-300/[0.08] bg-[#070b16]/95 shadow-[4px_0_32px_rgba(0,0,0,.45)] backdrop-blur-2xl transition-transform duration-300 ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+          <div>
+            <button type="button" onClick={() => setActiveNav('overview')} className="flex h-[74px] w-full items-center gap-3 border-b border-blue-200/[0.08] px-5 text-left">
+              <span className="nova-brand-star"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 2 29 18 46 24 29 29 24 46 18 29 2 24 18 18 24 2Z" stroke="currentColor" strokeWidth="2"/><path d="m24 11 3 10 10 3-10 3-3 10-3-10-10-3 10-3 3-10Z" fill="currentColor" fillOpacity=".32"/></svg></span>
+              <span><strong className="block font-headline-sm text-lg font-medium tracking-[.24em] text-white">NOVA</strong><small className="mt-1 block text-[9px] tracking-wide text-slate-500">Trade smarter. Live freer.</small></span>
+            </button>
+            <p className="px-5 pb-2 pt-6 font-label-tech text-[9px] uppercase tracking-[.2em] text-slate-600">Workspace</p>
+            <nav aria-label="Primary" className="flex flex-col gap-1 px-3">
+              {NAV_ITEMS.map((item) => <button key={item.id} type="button" onClick={() => { setActiveNav(item.id); if (item.id === 'accounts') setIsConnectAccountOpen(true); }} aria-current={activeNav === item.id ? 'page' : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-sm transition ${activeNav === item.id ? 'border border-violet-400/25 bg-gradient-to-r from-violet-600/25 to-blue-600/[0.04] font-medium text-white shadow-[0_0_24px_rgba(111,78,218,.1)]' : 'border border-transparent text-slate-400 hover:bg-white/[0.035] hover:text-slate-100'}`}><span className={`material-symbols-outlined text-[19px] ${activeNav === item.id ? 'text-violet-300' : 'text-slate-500'}`}>{item.icon}</span>{item.label}</button>)}
+            </nav>
           </div>
-        </main>
-        {toast}
-        <NovaOrbDock nova={nova} activeNav={activeNav} livekit={livekitVoice} />
+          <div className="m-3 rounded-xl border border-blue-300/[0.1] bg-gradient-to-br from-[#10182e] to-[#080d19] p-3.5">
+            <div className="flex items-center gap-2"><span className={`status-dot ${linkState === 'CONNECTED' ? 'is-online' : ''}`}/><span className="font-label-tech text-[9px] uppercase tracking-wider text-slate-300">{linkLabel}</span></div>
+            <p className="mt-2 text-[10px] leading-relaxed text-slate-500">{backendDown ? 'Dashboard data service is unavailable.' : 'Connect an account to load your live trading overview.'}</p>
+            <button type="button" onClick={() => void handleSyncFromHeader()} className="mt-2 text-[10px] text-violet-300 hover:text-violet-200">Refresh connection</button>
+          </div>
+        </aside>
+        <div className="relative z-10 lg:pl-64 xl:pr-[320px]">
+          <header className="fixed left-0 right-0 top-0 z-40 flex h-[74px] items-center justify-between gap-3 border-b border-blue-200/[0.08] bg-[#050812]/85 px-3 backdrop-blur-xl sm:px-6 lg:left-64">
+            <div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Open menu" onClick={() => setMenuOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">menu</span></button><div><h1 className="truncate text-sm font-semibold text-white sm:text-base">{greeting}{profile.display_name ? `, ${profile.display_name}` : ''}</h1><p className="hidden text-[10px] text-slate-500 sm:block">Your personal trading command center</p></div></div>
+            <div className="flex items-center gap-2"><div className="hidden rounded-lg border border-blue-200/[0.09] bg-white/[0.025] px-3 py-2 text-[10px] text-slate-300 sm:block"><span className="text-slate-500">UTC</span> · {formatUtcClock(utcSeconds)}</div>{!import.meta.env.DEV && <button type="button" onClick={handleSignOut} className="rounded-lg border border-white/10 px-3 py-2 text-[10px] text-slate-300 hover:bg-white/5">Sign out</button>}<button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-3 py-2 text-[10px] font-semibold text-white shadow-[0_5px_20px_rgba(93,68,202,.22)]"><span className="sm:hidden">Connect</span><span className="hidden sm:inline">Connect account</span></button></div>
+          </header>
+          <main className="min-h-screen px-4 pb-28 pt-[94px] sm:px-6 xl:px-5">
+            <div key={activeNav} className="nova-enter">
+              {activeNav === 'overview' && <div className="overview-shell"><section className="empty-dashboard-hero"><div><p className="overview-eyebrow"><span className="status-dot"/>NOVA · READY WHEN YOU ARE</p><p className="overview-value-label">Your dashboard is ready</p><h2 className="overview-value">A clearer view<br/>starts here.</h2><p className="overview-hero-sub">Connect a supported account to see your actual balance, equity, and trading performance.</p><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="empty-connect-button"><span className="material-symbols-outlined">add</span>Connect an account</button></div><div className="empty-dashboard-note"><span className="material-symbols-outlined">shield</span><strong>Real data only</strong><p>NOVA won’t show sample balances or invented trade history.</p></div></section><div className="overview-top-grid"><section className="overview-panel account-overview-panel"><div className="overview-panel-head"><div><h3>No accounts connected</h3><p>Once linked, your account summaries will appear here.</p></div></div><div className="overview-empty"><span className="material-symbols-outlined">account_balance</span><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}>Connect your first account <ChevronRight size={14}/></button></div></section><section className="overview-panel quick-actions-panel"><div className="overview-panel-head"><div><h3>Quick actions</h3><p>Explore your workspace</p></div></div><div className="overview-action-list"><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}><span className="action-icon violet"><span className="material-symbols-outlined">add</span></span><span><strong>Connect account</strong><small>Link a supported trading account</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('trade-journal')}><span className="action-icon blue"><span className="material-symbols-outlined">book</span></span><span><strong>Open journal</strong><small>Review recorded trades</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('analytics')}><span className="action-icon cyan"><span className="material-symbols-outlined">analytics</span></span><span><strong>Analyze performance</strong><small>Explore your trading analytics</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('finance')}><span className="action-icon green"><span className="material-symbols-outlined">account_balance_wallet</span></span><span><strong>View net worth</strong><small>Open your wealth tracker</small></span><ChevronRight size={15}/></button></div></section></div></div>}
+              {activeNav === 'accounts' && (isConnectAccountOpen ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} /> : <section className="overview-panel p-6"><h2 className="text-lg font-semibold text-white">No accounts connected</h2><button type="button" onClick={() => setIsConnectAccountOpen(true)} className="mt-3 text-sm text-violet-300">Connect account</button></section>)}
+              {activeNav === 'trade-journal' && <TradeJournalScreen trades={trades} selectedTrade={selectedTrade} accounts={accounts} activeAccountId="" onSelectAccount={() => undefined} onSelectTrade={setSelectedTrade} onAddTrade={handleAddTrade} onDeleteTrade={handleDeleteTrade} />}
+              {activeNav === 'ai' && <AiScreen mt5="NONE" name={profile.display_name} nova={nova} livekit={livekitVoice} />}
+              {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
+              {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
+              {activeNav === 'settings' && <SettingsPanel wake={wakeProps} profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />}
+            </div>
+          </main>
+        </div>
+        <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/10 bg-[#080b15]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">{([['overview', 'Home', 'dashboard'], ['accounts', 'Accounts', 'account_balance'], ['ai', 'NOVA', 'neurology'], ['finance', 'Net Worth', 'account_balance_wallet']] as const).map(([id, label, icon]) => <button key={id} type="button" onClick={() => setActiveNav(id)} className={`flex flex-col items-center gap-0.5 py-2 text-[9px] ${activeNav === id ? 'text-violet-300' : 'text-slate-500'}`}><span className="material-symbols-outlined text-[20px]">{icon}</span>{label}</button>)}<button type="button" onClick={() => setMenuOpen(true)} className="flex flex-col items-center gap-0.5 py-2 text-[9px] text-slate-500"><span className="material-symbols-outlined text-[20px]">apps</span>More</button></nav>
+        {toast}<NovaOrbDock nova={nova} activeNav={activeNav} livekit={livekitVoice} />
       </div>
     );
   }
@@ -692,13 +701,8 @@ export default function App() {
               onClick={() => setActiveNav('overview')}
               className="flex items-center gap-3 cursor-pointer"
             >
-              <div className="relative w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center p-0.5 bg-gradient-to-b from-white/15 to-white/0 border border-white/10 shadow-[0_0_15px_rgba(139,92,246,0.3)]">
-                <img
-                  alt="NOVA Apex Emblem"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-contain"
-                  src={NOVA_LOGO_URL}
-                />
+              <div className="nova-brand-star" aria-hidden="true">
+                <svg viewBox="0 0 48 48" fill="none"><path d="M24 2 29 18 46 24 29 29 24 46 18 29 2 24 18 18 24 2Z" stroke="currentColor" strokeWidth="2"/><path d="m24 11 3 10 10 3-10 3-3 10-3-10-10-3 10-3 3-10Z" fill="currentColor" fillOpacity=".32"/></svg>
               </div>
               <div className="flex flex-col">
                 <span className="font-headline-sm text-sm uppercase tracking-wider text-white font-bold leading-none">
@@ -798,7 +802,7 @@ export default function App() {
       </aside>
 
       {/* Main Wrapper */}
-      <div className="lg:pl-64 relative z-10">
+      <div className="lg:pl-64 xl:pr-[320px] relative z-10">
         <header className="fixed top-0 left-0 lg:left-64 right-0 h-16 bg-[#08090e]/80 backdrop-blur-2xl z-40 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.07] shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
           <div className="flex min-w-0 items-center gap-2">
           <button type="button" aria-label="Open menu" onClick={() => setMenuOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">menu</span></button>
@@ -1030,6 +1034,7 @@ export default function App() {
           {activeNav === 'overview' && (
             <OverviewScreen
               activeAccount={activeAccount}
+              accounts={accounts}
               trades={trades}
               onSync={() => void handleSyncFromHeader(activeAccount.id)}
               onOpenImportModal={() => {
@@ -1037,6 +1042,11 @@ export default function App() {
                 setIsImportModalOpen(true);
               }}
               onNavigateToJournal={() => setActiveNav('trade-journal')}
+              onNavigateToAccounts={() => { setActiveNav('accounts'); setIsConnectAccountOpen(false); }}
+              onNavigateToAnalytics={() => setActiveNav('analytics')}
+              onNavigateToFinance={() => setActiveNav('finance')}
+              onNavigateToSettings={() => setActiveNav('settings')}
+              onSelectAccount={(id) => setActiveAccountId(id)}
             />
           )}
 
