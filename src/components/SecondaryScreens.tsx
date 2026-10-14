@@ -12,11 +12,18 @@ import { AccountSettingsModal } from './AccountSettingsModal';
 export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades }) => {
   const [sessionFilter, setSessionFilter] = useState<'ALL' | 'OVERLAP' | 'LONDON' | 'NY'>('ALL');
 
-  const wins = trades.filter((t) => t.outcome === 'WIN');
-  const losses = trades.filter((t) => t.outcome === 'LOSS');
-  const winRate = trades.length > 0 ? ((wins.length / trades.length) * 100).toFixed(1) : '0.0';
+  const filteredTrades = trades.filter((trade) => {
+    if (sessionFilter === 'OVERLAP') return trade.session.includes('Overlap');
+    if (sessionFilter === 'LONDON') return trade.session.includes('London') && !trade.session.includes('Overlap');
+    if (sessionFilter === 'NY') return trade.session.includes('NY') && !trade.session.includes('Overlap');
+    return true;
+  });
 
-  const fullDlmTrades = trades.filter((t) => t.disciplineScore === 100);
+  const wins = filteredTrades.filter((t) => t.outcome === 'WIN');
+  const losses = filteredTrades.filter((t) => t.outcome === 'LOSS');
+  const winRate = filteredTrades.length > 0 ? ((wins.length / filteredTrades.length) * 100).toFixed(1) : '0.0';
+
+  const fullDlmTrades = filteredTrades.filter((t) => t.disciplineScore === 100);
   const fullDlmWins = fullDlmTrades.filter((t) => t.outcome === 'WIN');
   const dlmWinRate =
     fullDlmTrades.length > 0
@@ -32,9 +39,9 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
   const grossLoss = Math.abs(losses.reduce((acc, t) => acc + Math.min(0, t.pnlValue), 0));
   const netProfit = grossProfit - grossLoss;
 
-  const overlapTrades = trades.filter((t) => t.session.includes('Overlap'));
-  const londonTrades = trades.filter((t) => t.session.includes('London') && !t.session.includes('Overlap'));
-  const nyTrades = trades.filter((t) => t.session.includes('NY') && !t.session.includes('Overlap'));
+  const overlapTrades = filteredTrades.filter((t) => t.session.includes('Overlap'));
+  const londonTrades = filteredTrades.filter((t) => t.session.includes('London') && !t.session.includes('Overlap'));
+  const nyTrades = filteredTrades.filter((t) => t.session.includes('NY') && !t.session.includes('Overlap'));
 
   const getSessionStats = (list: TradeExecution[]) => {
     const listWins = list.filter((t) => t.outcome === 'WIN').length;
@@ -55,15 +62,18 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
   const nyStats = getSessionStats(nyTrades);
 
   return (
-    <div className="flex flex-col w-full gap-5">
-      <div className="terminal-glass rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">
+    <div className="overview-shell">
+      <section className="overview-hero min-h-[170px]">
+        <div className="overview-hero-content">
+          <p className="overview-eyebrow">PERFORMANCE WORKSPACE</p>
+          <h1 className="overview-value-label text-2xl font-semibold sm:text-3xl">Analytics</h1>
+          <p className="overview-hero-sub">Explore realized results and execution patterns from your recorded trades.</p>
+        </div>
+      </section>
+      <div className="overview-panel flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
         <div>
-          <span className="font-headline-sm text-lg font-bold text-white">
-            Quantitative Edge &amp; Statistical Attribution
-          </span>
-          <span className="block font-body-sm text-xs text-slate-400 mt-0.5">
-            Multi-variable expectancy decomposition across session windows and DLM checklist tiers
-          </span>
+          <h2 className="font-headline-sm text-base font-semibold text-white">Trade performance</h2>
+          <p className="mt-1 text-xs text-slate-400">Filter results by the session recorded on each trade.</p>
         </div>
         <div className="flex items-center bg-black/40 border border-white/[0.08] p-1 rounded-xl">
           {(['ALL', 'OVERLAP', 'LONDON', 'NY'] as const).map((s) => (
@@ -73,8 +83,8 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
               onClick={() => setSessionFilter(s)}
               className={
                 sessionFilter === s
-                  ? 'px-3 py-1 rounded-lg bg-purple-600/40 border border-purple-500/40 text-purple-200 font-bold font-label-tech text-[10px]'
-                  : 'px-3 py-1 rounded-lg text-slate-400 hover:text-white font-label-tech text-[10px]'
+                  ? 'rounded-lg border border-violet-400/25 bg-violet-500/15 px-3 py-2 text-[10px] font-bold text-violet-200'
+                  : 'rounded-lg px-3 py-2 text-[10px] text-slate-400 hover:text-white'
               }
             >
               {s}
@@ -83,8 +93,8 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="terminal-glass p-5 rounded-2xl">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="overview-panel p-4 sm:p-5">
           <span className="font-label-tech text-[10px] text-slate-400 uppercase">
             6/6 DLM Win Rate
           </span>
@@ -95,7 +105,7 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
             {fullDlmTrades.length} trades with 6/6 compliance
           </span>
         </div>
-        <div className="terminal-glass p-5 rounded-2xl">
+        <div className="overview-panel p-4 sm:p-5">
           <span className="font-label-tech text-[10px] text-slate-400 uppercase">
             Overall Win Rate
           </span>
@@ -103,10 +113,10 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
             {winRate}%
           </div>
           <span className="font-body-sm text-xs text-purple-300 mt-1 block">
-            {wins.length} Wins / {trades.length} Sampled
+            {wins.length} Wins / {filteredTrades.length} Sampled
           </span>
         </div>
-        <div className="terminal-glass p-5 rounded-2xl">
+        <div className="overview-panel p-4 sm:p-5">
           <span className="font-label-tech text-[10px] text-slate-400 uppercase">
             Avg Winner / Loser
           </span>
@@ -114,24 +124,24 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
             {avgWinR} / {avgLossR}
           </div>
           <span className="font-body-sm text-xs text-emerald-400 mt-1 block">
-            {trades.length > 0 ? 'Live MT5 Execution Ratio' : 'Awaiting executions'}
+            {filteredTrades.length > 0 ? 'Recorded trade results' : 'Awaiting executions'}
           </span>
         </div>
-        <div className="terminal-glass p-5 rounded-2xl">
+        <div className="overview-panel p-4 sm:p-5">
           <span className="font-label-tech text-[10px] text-slate-400 uppercase">
             SQN (System Quality)
           </span>
           <div className="font-label-numeric-lg text-2xl font-bold text-purple-300 mt-1 tabular-nums">
-            {trades.length >= 5 ? '2.84' : '--'}
+            —
           </div>
           <span className="font-body-sm text-xs text-slate-400 mt-1 block">
-            {trades.length >= 5 ? 'Institutional Grade' : 'Minimum 5 trades required'}
+            Not currently calculated
           </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
-        <div className="xl:col-span-7 terminal-glass rounded-2xl p-6">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+        <div className="overview-panel p-4 sm:p-5 xl:col-span-7">
           <span className="font-headline-sm text-base font-bold text-white block mb-1">
             Session Performance Breakdown
           </span>
@@ -159,7 +169,7 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
             ].map((row) => (
               <div
                 key={row.name}
-                className="terminal-glass-subtle p-4 rounded-xl border border-white/[0.05]"
+                className="terminal-glass-subtle rounded-xl border border-white/[0.05] p-4"
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-body-md text-xs font-semibold text-white">{row.name}</span>
@@ -180,7 +190,7 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
           </div>
         </div>
 
-        <div className="xl:col-span-5 terminal-glass rounded-2xl p-6 flex flex-col justify-between">
+        <div className="overview-panel flex flex-col justify-between p-4 sm:p-5 xl:col-span-5">
           <div>
             <span className="font-headline-sm text-base font-bold text-white block mb-1">
               Discipline vs. Premature Entry Matrix
@@ -212,9 +222,9 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
                     B- Early Anticipation (&lt;6 Rules)
                   </span>
                   <span className="font-label-numeric-md text-sm font-bold text-rose-400 tabular-nums">
-                    {trades.filter((t) => t.disciplineScore < 100).length > 0
+                      {filteredTrades.filter((t) => t.disciplineScore < 100).length > 0
                       ? `-$${Math.abs(
-                          trades
+                          filteredTrades
                             .filter((t) => t.disciplineScore < 100)
                             .reduce((acc, t) => acc + t.pnlValue, 0)
                         ).toFixed(2)} Net`
@@ -222,14 +232,14 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
                   </span>
                 </div>
                 <p className="font-body-sm text-xs text-slate-300 mt-1.5">
-                  Zero premature trades logged • Guardrail active
+                  {filteredTrades.filter((t) => t.disciplineScore < 100).length} recorded trades below full checklist compliance
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-xs text-purple-200">
-            <span className="font-bold">Live Guardrail Telemetry:</span> Net P&amp;L on connected MT5 account is currently ${netProfit.toFixed(2)}. Zero rule breaches recorded.
+          <div className="mt-4 rounded-xl border border-violet-400/15 bg-violet-500/[.06] p-3.5 text-xs text-violet-100">
+            <span className="font-bold">Filtered realized P&amp;L:</span> ${netProfit.toFixed(2)} across {filteredTrades.length} recorded trades. Open-position results are not included.
           </div>
         </div>
       </div>
@@ -319,30 +329,34 @@ export const AccountsScreen: React.FC<{
     : [];
 
   return (
-    <div className="flex flex-col w-full gap-5">
-      {/* Top Header Bar */}
-      <div className="terminal-glass rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">
+    <div className="overview-shell">
+      <section className="overview-hero min-h-[170px]">
+        <div className="overview-hero-content">
+          <p className="overview-eyebrow"><span className="status-dot is-online" />ACCOUNT CENTER</p>
+          <h1 className="overview-value-label text-2xl font-semibold sm:text-3xl">Accounts</h1>
+          <p className="overview-hero-sub">Manage your connected trading accounts and review their synced records.</p>
+        </div>
+      </section>
+      <div className="overview-panel flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
         <div>
           <div className="flex items-center gap-2.5">
-            <span className="font-headline-sm text-lg font-bold text-white">
-              Sovereign Prop Firm Portfolio Allocation
-            </span>
-            <span className="font-label-tech text-[10px] px-2.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-bold">
-              {accounts.length} CONNECTED {accounts.length === 1 ? 'ACCOUNT' : 'ACCOUNTS'}
+            <span className="font-headline-sm text-base font-semibold text-white">Trading accounts</span>
+            <span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2.5 py-1 font-label-tech text-[10px] font-bold text-violet-200">
+              {accounts.length} {accounts.length === 1 ? 'ACCOUNT' : 'ACCOUNTS'}
             </span>
           </div>
-          <span className="block font-body-sm text-xs text-slate-400 mt-0.5">
-            Review synced MT5 accounts and their recorded trade history
+          <span className="mt-1 block text-xs text-slate-400">
+            Review account status, current balances, and recorded trade history
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="font-label-numeric-md text-sm font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3.5 py-2 rounded-xl tabular-nums">
-            Total Capital: ${totalAllocation.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="rounded-xl border border-emerald-400/15 bg-emerald-500/[.06] px-3.5 py-2 font-label-numeric-md text-xs font-semibold tabular-nums text-emerald-200 sm:text-sm">
+            Starting balances: ${totalAllocation.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
           <button
             type="button"
             onClick={onOpenConnectModal}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-label-tech text-xs font-bold hover:brightness-110 shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all flex items-center gap-1.5"
+            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_5px_18px_rgba(93,68,202,.22)] transition hover:brightness-110"
           >
             <span className="material-symbols-outlined text-sm">add_link</span>
             <span>Add Account</span>
@@ -352,7 +366,7 @@ export const AccountsScreen: React.FC<{
 
       {/* Account Cards Grid or Empty State */}
       {accounts.length === 0 ? (
-        <div className="terminal-glass rounded-2xl p-12 text-center flex flex-col items-center justify-center">
+        <div className="overview-panel flex flex-col items-center justify-center p-8 text-center sm:p-12">
           <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/25 flex items-center justify-center text-purple-300 mb-4">
             <span className="material-symbols-outlined text-3xl">account_balance</span>
           </div>
@@ -365,14 +379,14 @@ export const AccountsScreen: React.FC<{
           <button
             type="button"
             onClick={onOpenConnectModal}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-label-tech text-xs font-bold hover:brightness-110 transition-all shadow-[0_0_20px_rgba(139,92,246,0.4)] flex items-center gap-2"
+            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:brightness-110"
           >
             <span className="material-symbols-outlined text-base">add_link</span>
             <span>Connect Account</span>
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 xl:gap-4">
           {accounts.map((acc) => {
             const isActive = acc.id === activeAccountId;
             const pct = Math.min(
@@ -391,10 +405,10 @@ export const AccountsScreen: React.FC<{
             return (
               <div
                 key={acc.id}
-                className={`terminal-glass rounded-2xl p-6 transition-all flex flex-col justify-between relative group ${
+                className={`overview-account-card flex flex-col justify-between transition-all relative group ${
                   isActive
-                    ? 'border-purple-500/50 shadow-[0_0_30px_rgba(139,92,246,0.25)] ring-1 ring-purple-500/30'
-                    : 'hover:border-white/20'
+                    ? 'active'
+                    : ''
                 }`}
               >
                 <div>

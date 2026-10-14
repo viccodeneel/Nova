@@ -59,6 +59,22 @@ const NAV_ITEMS: Array<{
   { id: 'settings', label: 'Settings', icon: 'tune', hoverColor: 'group-hover:text-slate-200' },
 ];
 
+const MOBILE_PRIMARY: Array<[NavSection, string, string]> = [
+  ['overview', 'Home', 'dashboard'],
+  ['accounts', 'Accounts', 'account_balance'],
+  ['trade-journal', 'Journal', 'auto_stories'],
+  ['finance', 'Net Worth', 'account_balance_wallet'],
+];
+
+const MobileMoreMenu: React.FC<{ activeNav: NavSection; onNavigate: (page: NavSection) => void; onClose: () => void }> = ({ activeNav, onNavigate, onClose }) => (
+  <div className="fixed inset-0 z-[75] bg-black/45 backdrop-blur-[2px] lg:hidden" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section role="dialog" aria-label="More navigation" className="absolute inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] rounded-2xl border border-blue-300/15 bg-[#0a1020]/95 p-3 shadow-2xl">
+      <p className="px-3 pb-2 pt-1 font-label-tech text-[9px] uppercase tracking-[.2em] text-slate-500">Workspace</p>
+      {([['ai', 'NOVA AI', 'neurology'], ['analytics', 'Analytics', 'analytics'], ['settings', 'Settings', 'tune']] as const).map(([page, label, icon]) => <button key={page} type="button" onClick={() => { onNavigate(page); onClose(); }} className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-sm transition ${activeNav === page ? 'border border-violet-400/25 bg-violet-500/10 text-violet-100' : 'text-slate-300 hover:bg-white/[.04]'}`}><span className="material-symbols-outlined text-lg text-violet-300">{icon}</span><span className="flex-1 text-left">{label}</span>{activeNav === page && <span className="status-dot is-online"/>}</button>)}
+    </section>
+  </div>
+);
+
 function mapBackendAccount(account: any): PropAccount {
   const startingBalance = Number(account.starting_balance || 0);
   const currentBalance = Number(account.current_balance || 0);
@@ -151,12 +167,12 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncToast, setSyncToast] = useState<{ success: boolean; message: string } | null>(null);
   const [backendDown, setBackendDown] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('nova_sidebar_collapsed') === 'true'; } catch { return false; }
   });
   const [profile, setProfile] = useState<Profile>({ display_name: '', avatar: null, currency: 'USD', networth_goal: null });
-  useEffect(() => { setMenuOpen(false); }, [activeNav]);
+  useEffect(() => { setMobileMoreOpen(false); }, [activeNav]);
   useEffect(() => {
     try { localStorage.setItem('nova_sidebar_collapsed', String(sidebarCollapsed)); } catch { /* Storage may be unavailable in private contexts. */ }
   }, [sidebarCollapsed]);
@@ -625,8 +641,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#050812] text-slate-100 antialiased">
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden"><div className="absolute -top-40 left-1/4 h-[550px] w-[750px] rounded-full bg-violet-600/[0.08] blur-[140px]"/><div className="absolute top-1/3 -right-24 h-[600px] w-[600px] rounded-full bg-cyan-500/[0.05] blur-[150px]"/></div>
-        {menuOpen && <div className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />}
-        <aside className={`fixed left-0 top-0 z-50 flex h-full w-64 ${sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-64'} flex-col justify-between border-r border-blue-300/[0.08] bg-[#070b16]/95 shadow-[4px_0_32px_rgba(0,0,0,.45)] backdrop-blur-2xl transition-[width,transform] duration-200 ease-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+        <aside className={`fixed left-0 top-0 z-50 hidden h-full w-64 ${sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-64'} flex-col justify-between border-r border-blue-300/[0.08] bg-[#070b16]/95 shadow-[4px_0_32px_rgba(0,0,0,.45)] backdrop-blur-2xl transition-[width,transform] duration-200 ease-out lg:flex`}>
           <div>
             <div className={`flex h-[74px] w-full items-center border-b border-blue-200/[0.08] ${sidebarCollapsed ? 'justify-between px-4 lg:justify-center lg:px-2' : 'justify-between px-5'}`}>
             <button type="button" onClick={() => setActiveNav('overview')} title="NOVA Dashboard" className={`flex min-w-0 items-center gap-3 text-left ${sidebarCollapsed ? 'justify-center' : ''}`}>
@@ -638,7 +653,7 @@ export default function App() {
             <p className={`px-5 pb-2 pt-6 font-label-tech text-[9px] uppercase tracking-[.2em] text-slate-600 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>Workspace</p>
             {sidebarCollapsed && <button type="button" onClick={() => setSidebarCollapsed(false)} aria-label="Expand sidebar" title="Expand sidebar" className="mx-auto mt-3 hidden h-9 w-9 place-items-center rounded-lg border border-white/[.07] text-slate-400 transition hover:border-violet-400/30 hover:text-white lg:grid"><ChevronRight size={16}/></button>}
             <nav aria-label="Primary" className={`mt-2 flex flex-col gap-1 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
-              {NAV_ITEMS.map((item) => <button key={item.id} type="button" onClick={() => { setActiveNav(item.id); if (item.id === 'accounts') setIsConnectAccountOpen(true); }} aria-current={activeNav === item.id ? 'page' : undefined} aria-label={sidebarCollapsed ? item.label : undefined} title={sidebarCollapsed ? item.label : undefined} className={`flex w-full items-center rounded-xl py-2.5 text-sm transition ${sidebarCollapsed ? 'gap-3 px-3.5 text-left lg:justify-center lg:px-0' : 'gap-3 px-3.5 text-left'} ${activeNav === item.id ? 'border border-violet-400/25 bg-gradient-to-r from-violet-600/25 to-blue-600/[0.04] font-medium text-white shadow-[0_0_24px_rgba(111,78,218,.1)]' : 'border border-transparent text-slate-400 hover:bg-white/[0.035] hover:text-slate-100'}`}><span className={`material-symbols-outlined text-[19px] ${activeNav === item.id ? 'text-violet-300' : 'text-slate-500'}`}>{item.icon}</span><span className={sidebarCollapsed ? 'lg:hidden' : ''}>{item.label}</span></button>)}
+              {NAV_ITEMS.map((item) => <button key={item.id} type="button" onClick={() => { setActiveNav(item.id); if (item.id === 'accounts') setIsConnectAccountOpen(false); }} aria-current={activeNav === item.id ? 'page' : undefined} aria-label={sidebarCollapsed ? item.label : undefined} title={sidebarCollapsed ? item.label : undefined} className={`flex w-full items-center rounded-xl py-2.5 text-sm transition ${sidebarCollapsed ? 'gap-3 px-3.5 text-left lg:justify-center lg:px-0' : 'gap-3 px-3.5 text-left'} ${activeNav === item.id ? 'border border-violet-400/25 bg-gradient-to-r from-violet-600/25 to-blue-600/[0.04] font-medium text-white shadow-[0_0_24px_rgba(111,78,218,.1)]' : 'border border-transparent text-slate-400 hover:bg-white/[0.035] hover:text-slate-100'}`}><span className={`material-symbols-outlined text-[19px] ${activeNav === item.id ? 'text-violet-300' : 'text-slate-500'}`}>{item.icon}</span><span className={sidebarCollapsed ? 'lg:hidden' : ''}>{item.label}</span></button>)}
             </nav>
           </div>
           <div className={`m-3 rounded-xl border border-blue-300/[0.1] bg-gradient-to-br from-[#10182e] to-[#080d19] ${sidebarCollapsed ? 'p-3 lg:flex lg:justify-center' : 'p-3.5'}`} title={sidebarCollapsed ? linkLabel : undefined}>
@@ -648,7 +663,7 @@ export default function App() {
         </aside>
         <div className={`relative z-10 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-64'} xl:pr-[320px]`}>
           <header className={`fixed left-0 right-0 top-0 z-40 flex h-[74px] items-center justify-between gap-3 border-b border-blue-200/[0.08] bg-[#050812]/85 px-3 backdrop-blur-xl transition-[left] duration-200 ease-out sm:px-6 ${sidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-64'}`}>
-            <div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Open menu" onClick={() => setMenuOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">menu</span></button><div><h1 className="truncate text-sm font-semibold text-white sm:text-base">{greeting}{profile.display_name ? `, ${profile.display_name}` : ''}</h1><p className="hidden text-[10px] text-slate-500 sm:block">Your personal trading command center</p></div></div>
+            <div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Open more navigation" onClick={() => setMobileMoreOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">apps</span></button><div><h1 className="truncate text-sm font-semibold text-white sm:text-base">{greeting}{profile.display_name ? `, ${profile.display_name}` : ''}</h1><p className="hidden text-[10px] text-slate-500 sm:block">Your personal trading command center</p></div></div>
             <div className="flex items-center gap-2"><div className="hidden rounded-lg border border-blue-200/[0.09] bg-white/[0.025] px-3 py-2 text-[10px] text-slate-300 sm:block"><span className="text-slate-500">UTC</span> · {formatUtcClock(utcSeconds)}</div>{!import.meta.env.DEV && <button type="button" onClick={handleSignOut} className="rounded-lg border border-white/10 px-3 py-2 text-[10px] text-slate-300 hover:bg-white/5">Sign out</button>}<button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-3 py-2 text-[10px] font-semibold text-white shadow-[0_5px_20px_rgba(93,68,202,.22)]"><span className="sm:hidden">Connect</span><span className="hidden sm:inline">Connect account</span></button></div>
           </header>
           <main className="min-h-screen px-4 pb-28 pt-[94px] sm:px-6 xl:px-5">
@@ -663,7 +678,8 @@ export default function App() {
             </div>
           </main>
         </div>
-        <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/10 bg-[#080b15]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">{([['overview', 'Home', 'dashboard'], ['accounts', 'Accounts', 'account_balance'], ['ai', 'NOVA', 'neurology'], ['finance', 'Net Worth', 'account_balance_wallet']] as const).map(([id, label, icon]) => <button key={id} type="button" onClick={() => setActiveNav(id)} className={`flex flex-col items-center gap-0.5 py-2 text-[9px] ${activeNav === id ? 'text-violet-300' : 'text-slate-500'}`}><span className="material-symbols-outlined text-[20px]">{icon}</span>{label}</button>)}<button type="button" onClick={() => setMenuOpen(true)} className="flex flex-col items-center gap-0.5 py-2 text-[9px] text-slate-500"><span className="material-symbols-outlined text-[20px]">apps</span>More</button></nav>
+        <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/10 bg-[#080b15]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">{MOBILE_PRIMARY.map(([id, label, icon]) => <button key={id} type="button" onClick={() => { setActiveNav(id); if (id === 'accounts') setIsConnectAccountOpen(false); }} aria-current={activeNav === id ? 'page' : undefined} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 py-1 text-[9px] ${activeNav === id ? 'text-violet-300' : 'text-slate-500'}`}><span className="material-symbols-outlined text-[20px]">{icon}</span>{label}</button>)}<button type="button" onClick={() => setMobileMoreOpen(true)} aria-expanded={mobileMoreOpen} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 py-1 text-[9px] ${(['ai', 'analytics', 'settings'] as NavSection[]).includes(activeNav) ? 'text-violet-300' : 'text-slate-500'}`}><span className="material-symbols-outlined text-[20px]">apps</span>More</button></nav>
+        {mobileMoreOpen && <MobileMoreMenu activeNav={activeNav} onNavigate={setActiveNav} onClose={() => setMobileMoreOpen(false)}/>}
         {toast}<NovaOrbDock nova={nova} activeNav={activeNav} livekit={livekitVoice} />
       </div>
     );
@@ -680,8 +696,7 @@ export default function App() {
       </div>
 
       {/* Sidebar Navigation */}
-      {menuOpen && <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />}
-      <aside className={`fixed left-0 top-0 h-full w-64 ${sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-64'} bg-[#0a0c13]/90 backdrop-blur-2xl z-50 flex flex-col justify-between border-r border-white/[0.07] shadow-[4px_0_30px_rgba(0,0,0,0.6)] transition-[width,transform] duration-200 ease-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+      <aside className={`fixed left-0 top-0 hidden h-full w-64 ${sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-64'} bg-[#0a0c13]/90 backdrop-blur-2xl z-50 flex-col justify-between border-r border-white/[0.07] shadow-[4px_0_30px_rgba(0,0,0,0.6)] transition-[width,transform] duration-200 ease-out lg:flex`}>
         <div className="flex flex-col">
           <div className={`h-16 flex items-center border-b border-white/[0.06] bg-white/[0.01] ${sidebarCollapsed ? 'justify-between px-4 lg:justify-center lg:px-2' : 'justify-between px-4'}`}>
             <div
@@ -797,7 +812,7 @@ export default function App() {
       <div className={`relative z-10 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-64'} xl:pr-[320px]`}>
         <header className={`fixed top-0 right-0 h-16 bg-[#08090e]/80 backdrop-blur-2xl z-40 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.07] shadow-[0_4px_30px_rgba(0,0,0,0.5)] transition-[left] duration-200 ease-out ${sidebarCollapsed ? 'left-0 lg:left-[76px]' : 'left-0 lg:left-64'}`}>
           <div className="flex min-w-0 items-center gap-2">
-          <button type="button" aria-label="Open menu" onClick={() => setMenuOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">menu</span></button>
+          <button type="button" aria-label="Open more navigation" onClick={() => setMobileMoreOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 lg:hidden"><span className="material-symbols-outlined">apps</span></button>
           <div className="flex min-w-0 flex-col justify-center">
             <div className="flex items-center gap-2.5">
               <span className="font-headline-sm text-base text-white font-semibold tracking-tight hidden sm:inline truncate">
@@ -1110,13 +1125,14 @@ export default function App() {
       </div>
 
       <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/10 bg-[#0a0c13]/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
-        {([['ai', 'NOVA', 'neurology'], ['overview', 'Dashboard', 'dashboard'], ['finance', 'Net Worth', 'account_balance_wallet'], ['settings', 'Settings', 'settings']] as const).map(([id, label, icon]) => (
-          <button key={id} type="button" onClick={() => setActiveNav(id)} className={`flex flex-col items-center gap-0.5 py-2.5 text-[10px] transition-colors ${activeNav === id ? 'text-cyan-300' : 'text-slate-500'}`}>
+        {MOBILE_PRIMARY.map(([id, label, icon]) => (
+          <button key={id} type="button" onClick={() => { setActiveNav(id); if (id === 'accounts') setIsConnectAccountOpen(false); }} aria-current={activeNav === id ? 'page' : undefined} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 py-1 text-[10px] transition-colors ${activeNav === id ? 'text-cyan-300' : 'text-slate-500'}`}>
             <span className="material-symbols-outlined text-[22px]">{icon}</span>{label}
           </button>
         ))}
-        <button type="button" onClick={() => setMenuOpen(true)} className="flex flex-col items-center gap-0.5 py-2.5 text-[10px] text-slate-500"><span className="material-symbols-outlined text-[22px]">apps</span>More</button>
+        <button type="button" onClick={() => setMobileMoreOpen(true)} aria-expanded={mobileMoreOpen} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 py-1 text-[10px] ${(['ai', 'analytics', 'settings'] as NavSection[]).includes(activeNav) ? 'text-cyan-300' : 'text-slate-500'}`}><span className="material-symbols-outlined text-[22px]">apps</span>More</button>
       </nav>
+      {mobileMoreOpen && <MobileMoreMenu activeNav={activeNav} onNavigate={setActiveNav} onClose={() => setMobileMoreOpen(false)}/>}
 
       {toast}
       <NovaOrbDock nova={nova} activeNav={activeNav} livekit={livekitVoice} />

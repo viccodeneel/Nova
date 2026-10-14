@@ -113,7 +113,12 @@ export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accou
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5 pb-10">
+    <div className="overview-shell mx-auto flex max-w-5xl flex-col gap-5 pb-10">
+      <header className="overview-hero px-5 py-5 sm:px-7 sm:py-6">
+        <p className="overview-kicker">PERSONALIZE NOVA</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Settings</h1>
+        <p className="mt-2 max-w-2xl text-sm text-slate-400">Manage your profile, preferences, voice, memories, and connected accounts.</p>
+      </header>
       <Card title="Profile" hint="Shown in the header and greeting.">
         <div className="flex items-center gap-4">
           <button type="button" onClick={() => file.current?.click()} aria-label="Change profile picture" className="group relative shrink-0">
