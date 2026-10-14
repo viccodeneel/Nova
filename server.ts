@@ -27,6 +27,7 @@ import { createLivekitRouter } from './backend/routes/livekit.ts';
 import { createLivekitVoiceRouter } from './backend/routes/livekitVoice.ts';
 import { createLivekitVoiceToolRouter } from './backend/routes/livekitVoiceTools.ts';
 import { createSessionSummaryStore } from './backend/services/livekitSummaryStore.ts';
+import { createMyfxbookRouter } from './backend/routes/myfxbook.ts';
 
 async function startServer() {
   const app = express();
@@ -78,6 +79,7 @@ async function startServer() {
   app.use('/api/trades', requireAuth, tradesRouter);
   app.use('/api/finance', requireAuth, financeRouter);
   app.use('/api/profile', requireAuth, profileRouter);
+  app.use('/api/myfxbook', createMyfxbookRouter());
   app.use('/api/connector', (req, res, next) => {
     if (req.path === '/sync-webhook') return next();
     return requireAuth(req, res, next);
