@@ -84,7 +84,10 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
     const cutoff = Date.now() - (range === '7d' ? 7 : 30) * 24 * 60 * 60 * 1000;
     return sorted.filter((trade) => (dateValue(trade.time) || 0) >= cutoff);
   }, [closedTrades, range]);
-  const progress = activeAccount.targetConfigured && activeAccount.targetProfit > 0 ? Math.max(0, Math.min(100, ((realizedPnl + (hasFloatingPnl ? floatingPnl : 0)) / activeAccount.targetProfit) * 100)) : null;
+  // Myfxbook history is capped at 50 transactions, so it cannot support a
+  // trustworthy challenge-progress calculation. Keep its configured target
+  // visible as metadata without treating partial history as progress.
+  const progress = activeAccount.source !== 'MYFXBOOK' && activeAccount.targetConfigured && activeAccount.targetProfit > 0 ? Math.max(0, Math.min(100, ((realizedPnl + (hasFloatingPnl ? floatingPnl : 0)) / activeAccount.targetProfit) * 100)) : null;
   const tradesWithR = closedTrades.filter((trade) => trade.rValueAvailable !== false);
   const averageR = tradesWithR.length ? tradesWithR.reduce((total, trade) => total + (Number(trade.rValue) || 0), 0) / tradesWithR.length : null;
   const accountColor = ['#8b5cf6', '#22d3ee', '#34d399', '#f59e0b', '#ec4899'];
@@ -169,6 +172,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
         <div className="overview-panel-head"><div><p className="overview-kicker">JOURNAL</p><h3>Trading discipline</h3></div><button type="button" className="overview-link" onClick={onNavigateToJournal}>Open journal <ChevronRight size={14}/></button></div>
         <div className="journal-score-row"><div className="win-ring" style={{ '--win-angle': `${(winRate || 0) * 3.6}deg` } as React.CSSProperties}><span>{winRate === null ? '—' : `${winRate.toFixed(0)}%`}</span></div><div><strong>Win rate</strong><small>{closedTrades.length ? `${winningTrades} wins · ${losingTrades} losses` : 'No closed trades yet'}</small></div></div>
         <div className="journal-stats"><div><small>Closed trades</small><strong>{closedTrades.length}</strong></div><div><small>Realized P&amp;L</small><strong className={realizedPnl >= 0 ? 'positive' : 'negative'}>{money(realizedPnl, activeAccount.currency)}</strong></div><div><small>Average R</small><strong>{averageR === null ? '—' : `${averageR >= 0 ? '+' : ''}${averageR.toFixed(2)}R`}</strong></div></div>
+        {activeAccount.source === 'MYFXBOOK' && activeAccount.targetConfigured && <div className="challenge-progress"><div className="challenge-progress-head"><span>{activeAccount.phaseConfigured ? activeAccount.phase : 'Personal configured target'}</span><strong>{money(activeAccount.targetProfit, activeAccount.currency)}</strong></div><small>User-configured reference target. NOVA does not infer challenge progress from Myfxbook’s limited history.</small></div>}
         {progress !== null && <div className="challenge-progress"><div className="challenge-progress-head"><span>{activeAccount.phaseConfigured ? activeAccount.phase : 'Configured target'} progress</span><strong>{progress.toFixed(1)}%</strong></div><div className="progress-track"><span style={{ width: `${progress}%` }}/></div><small>Realized {money(realizedPnl, activeAccount.currency)}{hasFloatingPnl ? ` · Floating ${money(floatingPnl, activeAccount.currency)}` : ''} toward configured target {money(activeAccount.targetProfit, activeAccount.currency)}</small></div>}
       </section>
     </div>

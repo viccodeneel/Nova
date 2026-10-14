@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import {
   calculateAccountMetricsFromTrades,
+  AccountSettings,
   DEFAULT_MT5_CONFIG,
   DlmRule,
   INITIAL_DLM_RULES,
@@ -20,14 +21,14 @@ import {
 import { Mt5ImportModal } from './components/Mt5ImportModal';
 import { LoginScreen } from './components/LoginScreen';
 import { ConnectAccountScreen } from './components/ConnectAccountScreen';
-import { AiScreen, type LinkState } from './components/AiScreen';
+import { AiScreen } from './components/AiScreen';
 import { useNovaVoice } from './voice/useNovaVoice';
 import { useLiveKitVoice } from './voice/useLiveKitVoice';
 import { NovaOrbDock } from './components/NovaOrbDock';
 import { NetWorthScreen } from './components/NetWorthScreen';
 import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
 import { ApiClient } from './services/apiClient.ts';
-import { beginMyfxbookActivityRequest, mapMyfxbookAccountToDashboard, mapMyfxbookActivityToTrades, MyfxbookActivityCache, MYFXBOOK_HISTORY_LIMIT, resolveActiveAccount, settleMyfxbookActivityRequest, tradesForAccount, MyfxbookAccountsResponse, MyfxbookRequestError } from './services/myfxbookAccounts';
+import { beginMyfxbookActivityRequest, mapMyfxbookAccountToDashboard, mapMyfxbookActivityToTrades, MyfxbookActivityCache, MYFXBOOK_HISTORY_LIMIT, resolveActiveAccount, scheduleMyfxbookHistoryNotice, myfxbookHistoryNoticeCycle, settleMyfxbookActivityRequest, tradesForAccount, MyfxbookAccountsResponse, MyfxbookRequestError } from './services/myfxbookAccounts';
 
 const NAV_ITEMS: Array<{
   id: NavSection;
@@ -175,7 +176,6 @@ export default function App() {
   const [targetImportAccount, setTargetImportAccount] = useState<PropAccount | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncToast, setSyncToast] = useState<{ success: boolean; message: string } | null>(null);
-  const [backendDown, setBackendDown] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('nova_sidebar_collapsed') === 'true'; } catch { return false; }
@@ -198,6 +198,19 @@ export default function App() {
   const selectedMyfxbookLoading = activeAccount?.source === 'MYFXBOOK' && (!selectedMyfxbookActivity || selectedMyfxbookActivity.loading);
   const selectedAccountIdRef = useRef(activeAccount?.id);
   selectedAccountIdRef.current = activeAccount?.id;
+  useEffect(() => {
+    const error = selectedMyfxbookActivity?.error;
+    if (!activeAccount || activeAccount.source !== 'MYFXBOOK' || !selectedMyfxbookActivity || !error) return;
+    const cycle = myfxbookHistoryNoticeCycle(activeAccount.id, selectedMyfxbookActivity.requestId, error);
+    if (historyNoticeCycleRef.current === cycle) return;
+    historyNoticeCycleRef.current = cycle;
+    historyNoticeCancelRef.current?.();
+    historyNoticeCancelRef.current = scheduleMyfxbookHistoryNotice((message) => {
+      setHistoryNotice(message ? { accountId: activeAccount.id, message } : null);
+      if (!message) historyNoticeCancelRef.current = null;
+    }, error.message);
+  }, [activeAccount?.id, selectedMyfxbookActivity?.requestId, selectedMyfxbookActivity?.error]);
+  useEffect(() => () => historyNoticeCancelRef.current?.(), []);
   const myfxbookRequestIds = useRef(new Map<string, number>());
   const loadMyfxbookActivity = (account: PropAccount): Promise<boolean> => {
     const providerAccountId = account.providerAccountId;
@@ -259,7 +272,9 @@ export default function App() {
     },
   });
   const wakeProps = { supported: nova.wakeSupported, enabled: nova.wakeEnabled, status: nova.wakeStatus, onChange: nova.setWakeEnabled };
-  const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
+  const [historyNotice, setHistoryNotice] = useState<{ accountId: string; message: string } | null>(null);
+  const historyNoticeCycleRef = useRef('');
+  const historyNoticeCancelRef = useRef<(() => void) | null>(null);
 
   // Header Interactive States
   const [utcSeconds, setUtcSeconds] = useState<number>(() => { const d = new Date(); return d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds(); });
@@ -302,7 +317,6 @@ export default function App() {
             phase: account.prop_phase?.phase_name || '',
             baseBalance: Number(account.starting_balance),
           });
-          setLastSyncedTime(account.last_synced_at || null);
         }
       }
     });
@@ -358,7 +372,6 @@ export default function App() {
         if (stopped) return;
 
         const connectedAccounts = backendAccounts;
-        setBackendDown(false);
         {
           const mappedAccounts = connectedAccounts.map(mapBackendAccount);
           setAccounts(mappedAccounts);
@@ -367,7 +380,6 @@ export default function App() {
               ? currentId
               : mappedAccounts[0]?.id ?? ''
           );
-          setLastSyncedTime(connectedAccounts[0]?.last_synced_at || null);
         }
 
         if (backendTrades.length > 0) {
@@ -398,7 +410,7 @@ export default function App() {
           })));
         }
       } catch {
-        setBackendDown(true); // keep last known data, but say so
+        // Keep the last known account data; no MT5 status indicator is shown in the UI.
       } finally {
         refreshing = false;
       }
@@ -462,7 +474,6 @@ export default function App() {
       phase: first.prop_phase?.phase_name || '',
       baseBalance: Number(first.starting_balance),
     });
-    setLastSyncedTime(first.last_synced_at || null);
     const backendTrades = await ApiClient.getTrades(first.id);
     const mappedTrades: TradeExecution[] = backendTrades.map((trade: any) => ({
       id: `MT5-${trade.primary_ticket || trade.id}`,
@@ -568,6 +579,22 @@ export default function App() {
   };
 
   const handleUpdateAccount = async (accountId: string, payload: { account_name: string; account_settings: Record<string, unknown> }) => {
+    const providerAccount = selectableAccounts.find((account) => account.id === accountId && account.source === 'MYFXBOOK');
+    if (providerAccount?.providerAccountId) {
+      await ApiClient.updateMyfxbookAccountSettings(providerAccount.providerAccountId, payload);
+      setMyfxbook((current) => current.data ? ({
+        ...current,
+        data: {
+          ...current.data,
+          accounts: current.data.accounts.map((account) => account.id === providerAccount.providerAccountId
+            ? { ...account, displayName: payload.account_name, accountSettings: payload.account_settings as AccountSettings }
+            : account),
+        },
+      }) : current);
+      setSyncToast({ success: true, message: `${payload.account_name} settings saved.` });
+      setTimeout(() => setSyncToast(null), 4000);
+      return;
+    }
     const updated = await ApiClient.updateAccount(accountId, payload);
     const mapped = mapBackendAccount(updated);
     setAccounts((current) => current.map((account) => account.id === accountId ? mapped : account));
@@ -645,7 +672,6 @@ export default function App() {
       const res = await ApiClient.syncLocalConnector();
 
       if (res.success) {
-        setLastSyncedTime(res.synced_at || new Date().toISOString());
         const backendAccounts = await ApiClient.getAccounts();
         const connectedAccounts = backendAccounts;
         const mappedAccounts = connectedAccounts.map(mapBackendAccount);
@@ -709,12 +735,6 @@ export default function App() {
       setTimeout(() => setSyncToast(null), 5000);
     }
   };
-  const status = activeAccount?.connectionStatus;
-  const linkState: LinkState = !activeAccount ? 'NONE' : status === 'CONNECTED' ? 'CONNECTED' : status === 'STALE' ? 'STALE' : 'DISCONNECTED';
-  const linkLabel = backendDown ? 'BACKEND UNREACHABLE' : { CONNECTED: 'MT5 CONNECTED', STALE: 'MT5 DATA STALE', DISCONNECTED: 'MT5 DISCONNECTED', NONE: 'NO MT5 ACCOUNT' }[linkState];
-  const tint = backendDown || linkState === 'STALE' ? 'amber' : linkState === 'CONNECTED' ? 'emerald' : linkState === 'DISCONNECTED' ? 'rose' : 'slate';
-  const chipCls = { amber: 'bg-amber-500/10 border-amber-500/30 text-amber-400', emerald: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400', rose: 'bg-rose-500/10 border-rose-500/30 text-rose-400', slate: 'bg-white/5 border-white/10 text-slate-400' }[tint];
-  const dotCls = { amber: 'bg-amber-400', emerald: 'bg-emerald-400', rose: 'bg-rose-400', slate: 'bg-slate-500' }[tint];
   const utcHour = Math.floor(utcSeconds / 3600);
   const sessionName = utcHour >= 13 && utcHour < 16 ? 'London / NY Overlap' : utcHour >= 7 && utcHour < 13 ? 'London Session' : utcHour >= 16 && utcHour < 21 ? 'New York Session' : 'Asian Session';
   const hourNow = new Date().getHours();
@@ -742,10 +762,7 @@ export default function App() {
               {NAV_ITEMS.map((item) => <button key={item.id} type="button" onClick={() => { setActiveNav(item.id); if (item.id === 'accounts') setIsConnectAccountOpen(false); }} aria-current={activeNav === item.id ? 'page' : undefined} aria-label={sidebarCollapsed ? item.label : undefined} title={sidebarCollapsed ? item.label : undefined} className={`flex w-full items-center rounded-xl py-2.5 text-sm transition ${sidebarCollapsed ? 'gap-3 px-3.5 text-left lg:justify-center lg:px-0' : 'gap-3 px-3.5 text-left'} ${activeNav === item.id ? 'border border-violet-400/25 bg-gradient-to-r from-violet-600/25 to-blue-600/[0.04] font-medium text-white shadow-[0_0_24px_rgba(111,78,218,.1)]' : 'border border-transparent text-slate-400 hover:bg-white/[0.035] hover:text-slate-100'}`}><span className={`material-symbols-outlined text-[19px] ${activeNav === item.id ? 'text-violet-300' : 'text-slate-500'}`}>{item.icon}</span><span className={sidebarCollapsed ? 'lg:hidden' : ''}>{item.label}</span></button>)}
             </nav>
           </div>
-          <div className={`m-3 rounded-xl border border-blue-300/[0.1] bg-gradient-to-br from-[#10182e] to-[#080d19] ${sidebarCollapsed ? 'p-3 lg:flex lg:justify-center' : 'p-3.5'}`} title={sidebarCollapsed ? linkLabel : undefined}>
-            <div className="flex items-center gap-2"><span className={`status-dot ${linkState === 'CONNECTED' ? 'is-online' : ''}`}/><span className={sidebarCollapsed ? 'lg:hidden font-label-tech text-[9px] uppercase tracking-wider text-slate-300' : 'font-label-tech text-[9px] uppercase tracking-wider text-slate-300'}>{linkLabel}</span></div>
-            <div className={sidebarCollapsed ? 'lg:hidden' : ''}><p className="mt-2 text-[10px] leading-relaxed text-slate-500">{backendDown ? 'Dashboard data service is unavailable.' : 'Connect an account to load your live trading overview.'}</p><button type="button" onClick={() => void handleSyncFromHeader()} className="mt-2 text-[10px] text-violet-300 hover:text-violet-200">Refresh connection</button></div>
-          </div>
+          <div className={`m-3 ${sidebarCollapsed ? 'lg:flex lg:justify-center' : ''}`}><button type="button" onClick={() => void handleSyncFromHeader()} title="Refresh account data" aria-label="Refresh account data" className="w-full rounded-xl border border-blue-300/[0.1] bg-[#10182e]/60 px-3 py-2 text-xs text-violet-200 transition hover:border-violet-300/30">{sidebarCollapsed ? '↻' : 'Refresh account data'}</button></div>
         </aside>
         <div className={`relative z-10 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-64'} xl:pr-[320px]`}>
           <header className={`fixed left-0 right-0 top-0 z-40 flex h-[74px] items-center justify-between gap-3 border-b border-blue-200/[0.08] bg-[#050812]/85 px-3 backdrop-blur-xl transition-[left] duration-200 ease-out sm:px-6 ${sidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-64'}`}>
@@ -757,7 +774,7 @@ export default function App() {
               {activeNav === 'overview' && <div className="overview-shell"><section className="empty-dashboard-hero"><div><p className="overview-eyebrow"><span className="status-dot"/>NOVA · READY WHEN YOU ARE</p><p className="overview-value-label">Your dashboard is ready</p><h2 className="overview-value">A clearer view<br/>starts here.</h2><p className="overview-hero-sub">Connect a supported account to see your actual balance, equity, and trading performance.</p><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="empty-connect-button"><span className="material-symbols-outlined">add</span>Connect an account</button></div><div className="empty-dashboard-note"><span className="material-symbols-outlined">shield</span><strong>Real data only</strong><p>NOVA won’t show sample balances or invented trade history.</p></div></section><div className="overview-top-grid"><section className="overview-panel account-overview-panel"><div className="overview-panel-head"><div><h3>No accounts connected</h3><p>Once linked, your account summaries will appear here.</p></div></div><div className="overview-empty"><span className="material-symbols-outlined">account_balance</span><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}>Connect your first account <ChevronRight size={14}/></button></div></section><section className="overview-panel quick-actions-panel"><div className="overview-panel-head"><div><h3>Quick actions</h3><p>Explore your workspace</p></div></div><div className="overview-action-list"><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}><span className="action-icon violet"><span className="material-symbols-outlined">add</span></span><span><strong>Connect account</strong><small>Link a supported trading account</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('trade-journal')}><span className="action-icon blue"><span className="material-symbols-outlined">book</span></span><span><strong>Open journal</strong><small>Review recorded trades</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('analytics')}><span className="action-icon cyan"><span className="material-symbols-outlined">analytics</span></span><span><strong>Analyze performance</strong><small>Explore your trading analytics</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('finance')}><span className="action-icon green"><span className="material-symbols-outlined">account_balance_wallet</span></span><span><strong>View net worth</strong><small>Open your wealth tracker</small></span><ChevronRight size={15}/></button></div></section></div><div className="overview-panel p-5 text-xs text-slate-400">No NOVA trading accounts are connected yet.</div></div>}
               {activeNav === 'accounts' && (isConnectAccountOpen ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} /> : <div className="overview-shell"><section className="overview-panel p-6"><h2 className="text-lg font-semibold text-white">No MT5 accounts connected</h2><button type="button" onClick={() => setIsConnectAccountOpen(true)} className="mt-3 text-sm text-violet-300">Connect account</button></section>{myfxbook.loading ? <p className="text-xs text-slate-500">Loading available accounts…</p> : myfxbook.error ? <p role="status" className="text-xs text-amber-200">Myfxbook account data is unavailable.</p> : <p className="text-xs text-slate-500">No connected trading accounts were returned.</p>}</div>)}
               {activeNav === 'trade-journal' && <TradeJournalScreen trades={trades} selectedTrade={selectedTrade} accounts={selectableAccounts} activeAccountId={undefined} onSelectAccount={selectAccount} currency={profile.currency} activityLoading={false} onSelectTrade={setSelectedTrade} onAddTrade={handleAddTrade} onDeleteTrade={handleDeleteTrade} />}
-              {activeNav === 'ai' && <AiScreen mt5="NONE" name={profile.display_name} nova={nova} livekit={livekitVoice} />}
+              {activeNav === 'ai' && <AiScreen name={profile.display_name} nova={nova} livekit={livekitVoice} />}
               {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
               {activeNav === 'analytics' && <AnalyticsScreen trades={[]} currency={profile.currency} activityLoading={false} />}
               {activeNav === 'settings' && <SettingsPanel wake={wakeProps} profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />}
@@ -860,38 +877,7 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Institutional MT5 Connectivity Badge Card */}
-        <div
-          onClick={() => void handleSyncFromHeader()}
-          title="Sync from the configured MT5 connector"
-          className={`relative m-3 cursor-pointer overflow-hidden rounded-xl border border-white/[0.08] bg-gradient-to-b from-[#111420] to-[#0a0c12] shadow-[0_8px_20px_rgba(0,0,0,0.5)] transition-all hover:border-purple-500/40 group ${sidebarCollapsed ? 'flex justify-center p-3' : 'p-3'}`}
-        >
-          <div className="absolute -right-6 -bottom-6 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none"></div>
-          <div className={`mb-2 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
-                <span className={`absolute inline-flex h-full w-full rounded-full opacity-80 ${linkState === 'CONNECTED' ? 'animate-ping' : ''} ${dotCls}`}></span>
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${dotCls}`}></span>
-              </span>
-              {!sidebarCollapsed && <span className={`font-label-tech text-[10px] font-bold uppercase tracking-wider ${chipCls.split(' ').pop()}`}>
-                {linkLabel}
-              </span>}
-            </div>
-            {!sidebarCollapsed && <span className="font-label-numeric-sm text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-slate-400 font-medium">
-              READ ONLY
-            </span>}
-          </div>
-          {!sidebarCollapsed && <><div className="mb-2 text-[11px] text-slate-400">
-            {lastSyncedTime ? `Last data ${new Date(lastSyncedTime).toLocaleTimeString()}` : 'No data received yet'}
-          </div>
-          <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
-            <span className="font-label-tech text-[10px] text-slate-400">Active Prop</span>
-            <span className="font-label-numeric-sm text-[11px] text-purple-300 font-semibold tracking-tight truncate max-w-[120px]">
-              {activeAccount.shortRef}
-            </span>
-          </div>
-          </>}
-        </div>
+        <div className="m-3"><button type="button" onClick={() => void handleSyncFromHeader(activeAccount.id)} title="Refresh account data" aria-label="Refresh account data" className={`rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-violet-200 transition hover:border-violet-400/30 ${sidebarCollapsed ? 'w-full' : ''}`}>{sidebarCollapsed ? '↻' : 'Refresh account data'}</button></div>
       </aside>
 
       {/* Main Wrapper */}
@@ -903,10 +889,6 @@ export default function App() {
             <div className="flex items-center gap-2.5">
               <span className="font-headline-sm text-base text-white font-semibold tracking-tight hidden sm:inline truncate">
                 {greeting}{profile.display_name ? `, ${profile.display_name}` : ''}
-              </span>
-              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${chipCls} font-label-tech text-[10px] font-semibold tracking-wider`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${dotCls} ${linkState === 'CONNECTED' ? 'animate-pulse' : ''}`}></span>
-                {linkLabel}
               </span>
             </div>
             <span className="font-body-sm text-[11px] text-slate-400 font-normal mt-0.5 hidden sm:flex items-center gap-1.5">
@@ -929,16 +911,7 @@ export default function App() {
                   {formatUtcClock(utcSeconds)}
                 </span>
               </div>
-              <div
-                onClick={() => void handleSyncFromHeader()}
-                title="Sync data from MT5"
-                className="flex items-center gap-2 bg-white/[0.03] border border-white/[0.06] hover:border-purple-500/30 px-3 py-1.5 rounded-lg cursor-pointer transition-all"
-              >
-                <span className="h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8]"></span>
-                <span className="font-label-tech text-[11px] text-slate-300 font-medium">
-                  {activeAccount.isRealConnected ? `${activeAccount.bridge} / Connected` : 'MT5 Disconnected'}
-                </span>
-              </div>
+              <button type="button" onClick={() => void handleSyncFromHeader(activeAccount.id)} title="Refresh account data" className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-300 transition hover:border-purple-500/30">Refresh data</button>
             </div>
 
             <div className="h-6 w-px bg-white/10 mx-1"></div>
@@ -1143,7 +1116,7 @@ export default function App() {
               onOpenAccountDetails={(id) => { selectAccount(id); setActiveNav('accounts'); setIsConnectAccountOpen(false); setAccountDetailsId(id); }}
               activityLoading={selectedMyfxbookLoading}
               activityLoaded={selectedMyfxbookActivity?.loaded}
-              activityError={selectedMyfxbookActivity?.error?.message}
+              activityError={historyNotice?.accountId === activeAccount.id ? historyNotice.message : null}
               activityHistoryLimit={activeAccount.source === 'MYFXBOOK' ? MYFXBOOK_HISTORY_LIMIT : undefined}
             />
           )}
@@ -1165,14 +1138,14 @@ export default function App() {
               }}
               currency={activeAccount.currency}
               activityLoading={selectedMyfxbookLoading}
-              activityError={selectedMyfxbookActivity?.error?.message}
+              activityError={historyNotice?.accountId === activeAccount.id ? historyNotice.message : null}
               activityHistoryLimit={activeAccount.source === 'MYFXBOOK' ? MYFXBOOK_HISTORY_LIMIT : undefined}
             />
           )}
 
-          {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} nova={nova} livekit={livekitVoice} />}
+          {activeNav === 'ai' && <AiScreen name={profile.display_name} nova={nova} livekit={livekitVoice} />}
           {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
-          {activeNav === 'analytics' && <AnalyticsScreen trades={activeTrades} currency={activeAccount.currency} activityLoading={selectedMyfxbookLoading} activityError={selectedMyfxbookActivity?.error?.message} activityHistoryLimit={activeAccount.source === 'MYFXBOOK' ? MYFXBOOK_HISTORY_LIMIT : undefined} />}
+          {activeNav === 'analytics' && <AnalyticsScreen trades={activeTrades} currency={activeAccount.currency} activityLoading={selectedMyfxbookLoading} activityError={historyNotice?.accountId === activeAccount.id ? historyNotice.message : null} activityHistoryLimit={activeAccount.source === 'MYFXBOOK' ? MYFXBOOK_HISTORY_LIMIT : undefined} providerAccountProfit={activeAccount.source === 'MYFXBOOK' && activeAccount.profitAvailable ? activeAccount.netProfit : undefined} />}
 
           {activeNav === 'accounts' && (
             isConnectAccountOpen ? (

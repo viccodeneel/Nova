@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { beginMyfxbookActivityRequest, getMyfxbookLoadState, mapMyfxbookAccountToDashboard, mapMyfxbookActivityToTrades, myfxbookRealizedTradePnl, MyfxbookRequestError, MYFXBOOK_HISTORY_LIMIT, parseMyfxbookAccountsResponse, resolveActiveAccount, settleMyfxbookActivityRequest, tradesForAccount } from './myfxbookAccounts.ts';
+import { beginMyfxbookActivityRequest, formatMyfxbookActivityAmount, getMyfxbookLoadState, mapMyfxbookAccountToDashboard, mapMyfxbookActivityToTrades, myfxbookHistoryNoticeCycle, myfxbookRealizedTradePnl, MyfxbookRequestError, MYFXBOOK_HISTORY_LIMIT, MYFXBOOK_HISTORY_NOTICE_MS, parseMyfxbookAccountsResponse, resolveActiveAccount, scheduleMyfxbookHistoryNotice, settleMyfxbookActivityRequest, tradesForAccount } from './myfxbookAccounts.ts';
 
 const response = {
   success: true,
@@ -143,20 +143,87 @@ test('Myfxbook realized trade P&L sums the trade result and separate costs once,
   const activity = {
     provider: 'Myfxbook' as const, accountId: '42', fetchedAt: '2026-10-14T12:00:00.000Z',
     history: [
-      { symbol: 'EURUSD', direction: 'Buy Limit', profit: 100, commission: -2, interest: 1, swap: -0.5 },
+      { symbol: 'EURUSD', direction: 'Buy Limit', profit: 100, commission: -2, interest: 1, swap: 1 },
       { symbol: '', direction: 'Balance', profit: 1050.25 },
       { symbol: 'USD', direction: 'Credit', profit: 500 },
     ],
     openTrades: [],
   };
   const mapped = mapMyfxbookActivityToTrades(account, activity);
-  assert.equal(myfxbookRealizedTradePnl(activity.history[0]), 98.5);
+  assert.equal(myfxbookRealizedTradePnl(activity.history[0]), 99);
   assert.equal(mapped[0].side, 'BUY');
-  assert.equal(mapped[0].pnlValue, 98.5);
-  assert.deepEqual(mapped.slice(1).map((trade) => [trade.outcome, trade.pnlAvailable]), [['UNKNOWN', false], ['UNKNOWN', false]]);
+  assert.equal(mapped[0].pnlValue, 99);
+  assert.deepEqual(mapped.slice(1).map((trade) => [trade.instrument, trade.activityType, trade.outcome, trade.pnlAvailable]), [['Deposit', 'DEPOSIT', 'UNKNOWN', false], ['Credit', 'OTHER', 'UNKNOWN', false]]);
   const closedPerformance = mapped.filter((trade) => trade.tradeStatus !== 'OPEN' && trade.pnlAvailable !== false && ['WIN', 'LOSS', 'BE'].includes(trade.outcome));
-  assert.equal(closedPerformance.reduce((total, trade) => total + trade.pnlValue, 0), 98.5);
+  assert.equal(closedPerformance.reduce((total, trade) => total + trade.pnlValue, 0), 99);
   assert.notEqual(closedPerformance[0].pnlValue, account.currentBalance);
+  assert.equal(myfxbookRealizedTradePnl({ symbol: 'EURUSD', direction: 'Sell', profit: 100, commission: -2, swap: -1 }), 97, 'swap is used when the documented interest field is absent');
+});
+
+test('keeps provider account profit separate from filtered closed-trade realized results', () => {
+  const account = mapMyfxbookAccountToDashboard(parseMyfxbookAccountsResponse(response).accounts[0]);
+  const activity = { provider: 'Myfxbook' as const, accountId: '42', fetchedAt: '2026-10-14T12:00:00.000Z', history: [
+    { symbol: 'EURUSD', direction: 'Buy', profit: 12, commission: -1, interest: 0.25 },
+    { direction: 'Deposit', profit: 1050.25 },
+  ], openTrades: [] };
+  const records = mapMyfxbookActivityToTrades(account, activity);
+  assert.equal(account.netProfit, 14.25);
+  assert.equal(myfxbookRealizedTradePnl(activity.history[0]), 11.25);
+  assert.notEqual(account.netProfit, records[0].pnlValue);
+  assert.equal(records[1].activityType, 'DEPOSIT');
+  assert.equal(records[1].pnlAvailable, false);
+});
+
+test('classifies funding transactions as signed activity amounts and never trading outcomes', () => {
+  const account = mapMyfxbookAccountToDashboard(parseMyfxbookAccountsResponse(response).accounts[0]);
+  const mapped = mapMyfxbookActivityToTrades(account, {
+    provider: 'Myfxbook', accountId: '42', fetchedAt: '2026-10-14T12:00:00.000Z', openTrades: [],
+    history: [
+      { direction: 'Deposit', profit: -500, openTime: '10/01/2026 09:00', closeTime: '10/01/2026 09:00' },
+      { direction: 'Withdrawal', profit: 125, openTime: '10/02/2026 09:00', closeTime: '10/02/2026 09:00' },
+      { direction: 'Withdrawal', profit: -25, openTime: '10/03/2026 09:00', closeTime: '10/03/2026 09:00' },
+      { direction: 'Balance', profit: 750, openTime: '10/04/2026 09:00', closeTime: '10/04/2026 09:00' },
+      { direction: 'Balance', profit: -80, openTime: '10/05/2026 09:00', closeTime: '10/05/2026 09:00' },
+    ],
+  });
+  assert.deepEqual(mapped.map((record) => [record.activityType, record.instrument, record.activityAmount, record.pnlAvailable, record.outcome]), [
+    ['DEPOSIT', 'Deposit', 500, false, 'UNKNOWN'],
+    ['WITHDRAWAL', 'Withdrawal', -125, false, 'UNKNOWN'],
+    ['WITHDRAWAL', 'Withdrawal', -25, false, 'UNKNOWN'],
+    ['DEPOSIT', 'Deposit', 750, false, 'UNKNOWN'],
+    ['WITHDRAWAL', 'Withdrawal', -80, false, 'UNKNOWN'],
+  ]);
+  assert.equal(formatMyfxbookActivityAmount(mapped[0].activityAmount || 0, account.currency), '+$500.00');
+  assert.equal(formatMyfxbookActivityAmount(mapped[1].activityAmount || 0, account.currency), '−$125.00');
+  assert.equal(account.startingBalanceAvailable, false, 'a limited history sample cannot establish an original funding event');
+});
+
+test('uses a manually configured starting balance and NOVA account metadata without changing provider values', () => {
+  const myfx = parseMyfxbookAccountsResponse({ ...response, data: { ...response.data, accounts: [{ ...response.data.accounts[0], novaDisplayName: 'Funded NOVA label', novaSettings: { classification: 'PROP_FIRM', starting_balance: 100000, prop_firm_name: 'Firm', challenge: { type: 'TWO_STEP', stage: 'PHASE_2', phase2_target_percent: 5 } } }] } });
+  const account = mapMyfxbookAccountToDashboard(myfx.accounts[0]);
+  assert.equal(account.name, 'Funded NOVA label');
+  assert.equal(account.baseBalance, 100000);
+  assert.equal(account.startingBalanceAvailable, true);
+  assert.equal(account.currentBalance, 1050.25);
+  assert.equal(account.classification, 'PROP_FIRM');
+  assert.equal(account.accountSettings?.challenge?.stage, 'PHASE_2');
+});
+
+test('history-unavailable notice is deduplicated by fetch cycle and dismisses after one second', () => {
+  const error = new MyfxbookRequestError('History unavailable', 503);
+  assert.equal(myfxbookHistoryNoticeCycle('myfxbook:42', 8, error), myfxbookHistoryNoticeCycle('myfxbook:42', 8, error));
+  assert.notEqual(myfxbookHistoryNoticeCycle('myfxbook:42', 8, error), myfxbookHistoryNoticeCycle('myfxbook:42', 9, error));
+  assert.equal(MYFXBOOK_HISTORY_NOTICE_MS, 1000);
+  let shown: string | null = null;
+  let delay = 0;
+  let dismiss: () => void = () => {};
+  const fakeSchedule = ((callback: () => void, ms: number) => { delay = ms; dismiss = callback; return 1; }) as unknown as typeof setTimeout;
+  const cancelNotice = scheduleMyfxbookHistoryNotice((message) => { shown = message; }, error.message, fakeSchedule, (() => undefined) as typeof clearTimeout);
+  assert.equal(shown, error.message);
+  assert.equal(delay, 1000);
+  dismiss();
+  assert.equal(shown, null);
+  cancelNotice();
 });
 
 test('provider history coverage is explicitly capped and repeated valid refreshes replace rather than append records', () => {

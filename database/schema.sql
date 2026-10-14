@@ -257,6 +257,7 @@ CREATE TABLE IF NOT EXISTS app_profile (
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     networth_goal NUMERIC(18,2),
     password_hash TEXT,
+    provider_account_settings JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 

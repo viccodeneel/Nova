@@ -5,14 +5,12 @@ import { ApiClient } from '../services/apiClient.ts';
 import type { NovaVoice } from '../voice/useNovaVoice.ts';
 import type { LiveKitVoice } from '../voice/useLiveKitVoice.ts';
 
-export type LinkState = 'CONNECTED' | 'STALE' | 'DISCONNECTED' | 'NONE';
-
 const tone = (ok: boolean | 'warn') => (ok === true ? 'text-emerald-400' : ok === 'warn' ? 'text-amber-400' : 'text-slate-500');
 const WAKE_LABEL = { off: 'OFF', listening: 'LISTENING', paused: 'LISTENING', blocked: 'MIC BLOCKED', unsupported: 'UNSUPPORTED' } as const;
 
 // Every status row below reflects real state. The conversation engine lives in useNovaVoice (app level),
 // so voice sessions keep running when you switch tabs.
-export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice; livekit: LiveKitVoice }> = ({ mt5, name, nova, livekit }) => {
+export const AiScreen: React.FC<{ name?: string; nova: NovaVoice; livekit: LiveKitVoice }> = ({ name, nova, livekit }) => {
   const h = new Date().getHours();
   const {
     messages, input, setInput, busy, error, listening, voiceFeedback, voiceConversation, voiceSpeaking, voicePulse,
@@ -36,7 +34,6 @@ export const AiScreen: React.FC<{ mt5: LinkState; name?: string; nova: NovaVoice
   }, []);
   const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const rows: Array<[string, string, boolean | 'warn']> = [
-    ['MT5 data link', mt5 === 'CONNECTED' ? 'LIVE' : mt5 === 'STALE' ? 'STALE' : mt5 === 'NONE' ? 'NO ACCOUNT' : 'OFFLINE', mt5 === 'CONNECTED' ? true : mt5 === 'STALE' ? 'warn' : false],
     ['Reasoning core', aiUnreachable ? 'BACKEND UNREACHABLE' : aiReady === null ? 'CHECKING' : aiReady ? 'CONFIGURED' : 'NOT CONFIGURED', aiUnreachable ? 'warn' : aiReady === true],
     ['Voice chat', !voiceConversationSupported ? 'UNSUPPORTED' : voiceConversation ? (listening ? 'LISTENING' : 'ACTIVE') : 'READY', voiceConversation ? 'warn' : voiceConversationSupported],
     ['LiveKit voice', livekit.phase === 'connecting' ? 'CONNECTING' : livekit.phase === 'speaking' ? 'SPEAKING' : livekit.active ? 'LISTENING' : livekit.phase === 'error' ? 'DISCONNECTED' : livekit.phase === 'disabled' ? 'NOT CONFIGURED' : livekit.phase === 'checking' ? 'CHECKING' : 'IDLE', livekit.active ? true : livekit.phase === 'error' ? 'warn' : livekit.available],

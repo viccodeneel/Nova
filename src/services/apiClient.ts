@@ -153,6 +153,21 @@ export class ApiClient {
     } as MyfxbookAccountActivity;
   }
 
+  public static async updateMyfxbookAccountSettings(
+    providerAccountId: string,
+    payload: { account_name: string; account_settings: Record<string, unknown> },
+  ): Promise<void> {
+    const safeId = encodeURIComponent(providerAccountId);
+    const response = await this.request(`${this.baseUrl}/myfxbook/accounts/${safeId}/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.error || `Could not save Myfxbook account settings (HTTP ${response.status}).`);
+  }
+
   public static async getLiveKitVoiceToken(accountId?: string): Promise<LiveKitVoiceCredentials> {
     const res = await this.request(`${this.baseUrl}/livekit/voice/token`, {
       method: 'POST',

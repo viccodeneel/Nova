@@ -9,7 +9,7 @@ import {
 import { AccountSettingsModal } from './AccountSettingsModal';
 
 /* ================= ANALYTICS SCREEN ================= */
-export const AnalyticsScreen: React.FC<{ trades: TradeExecution[]; currency?: string; activityLoading?: boolean; activityError?: string | null; activityHistoryLimit?: number }> = ({ trades, currency, activityLoading, activityError, activityHistoryLimit }) => {
+export const AnalyticsScreen: React.FC<{ trades: TradeExecution[]; currency?: string; activityLoading?: boolean; activityError?: string | null; activityHistoryLimit?: number; providerAccountProfit?: number }> = ({ trades, currency, activityLoading, activityError, activityHistoryLimit, providerAccountProfit }) => {
   const [sessionFilter, setSessionFilter] = useState<'ALL' | 'OVERLAP' | 'LONDON' | 'NY'>('ALL');
 
   const filteredTrades = trades.filter((trade) => {
@@ -85,14 +85,15 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[]; currency?: st
           <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2.5">
             {[
               { label: 'Win rate', value: winRate === null ? '—' : `${winRate}%`, detail: `${wins.length} wins · ${losses.length} losses · ${breakeven.length} break even`, tint: 'text-cyan-200' },
-              { label: 'Net profit', value: performanceTrades.length ? formatMoney(netProfit) : '—', detail: 'Filtered recorded results', tint: netProfit < 0 ? 'text-rose-300' : 'text-emerald-300' },
+              { label: 'Realized trade P&L', value: performanceTrades.length ? formatMoney(netProfit) : '—', detail: activityHistoryLimit ? `Filtered closed trades · latest up to ${activityHistoryLimit} provider transactions` : 'Filtered recorded closed-trade results', tint: netProfit < 0 ? 'text-rose-300' : 'text-emerald-300' },
               { label: 'Total trades', value: performanceTrades.length.toLocaleString(), detail: 'Completed results with reported P&L', tint: 'text-white' },
               { label: 'Average winner / loser', value: `${avgWinR} / ${avgLossR}`, detail: 'Recorded R multiples', tint: 'text-violet-200' },
+              ...(providerAccountProfit === undefined ? [] : [{ label: 'Myfxbook account profit', value: formatMoney(providerAccountProfit), detail: 'Provider account-level metric; distinct from filtered realized trade P&L', tint: providerAccountProfit < 0 ? 'text-rose-300' : 'text-emerald-300' }]),
             ].map((metric) => (
               <div key={metric.label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3 sm:p-3.5">
                 <p className="truncate text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{metric.label}</p>
                 <p className={`mt-1.5 truncate text-lg font-semibold tabular-nums sm:text-xl ${metric.tint}`}>{metric.value}</p>
-                <p className="mt-1 truncate text-[10px] text-slate-500" title={metric.detail}>{metric.detail}</p>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500" title={metric.detail}>{metric.detail}</p>
               </div>
             ))}
           </div>
@@ -242,11 +243,11 @@ export const AccountsScreen: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
 
-  const summarizeByCurrency = (getValue: (account: PropAccount) => number, isAvailable: (account: PropAccount) => boolean) => {
+  const summarizeByCurrency = (getValue: (account: PropAccount) => number, isAvailable: (account: PropAccount) => boolean, list = accounts) => {
     const totals = new Map<string, number>();
     const unclassified: Array<{ label: string; value: number }> = [];
     let unavailable = 0;
-    for (const account of accounts) {
+    for (const account of list) {
       const value = getValue(account);
       if (!isAvailable(account) || !Number.isFinite(value)) {
         unavailable += 1;
@@ -262,7 +263,10 @@ export const AccountsScreen: React.FC<{
     };
   };
   const allocationSummary = summarizeByCurrency((account) => account.baseBalance, (account) => account.startingBalanceAvailable !== false);
-  const profitSummary = summarizeByCurrency((account) => account.netProfit, (account) => account.profitAvailable !== false);
+  const novaAccounts = accounts.filter((account) => account.source !== 'MYFXBOOK');
+  const myfxbookAccounts = accounts.filter((account) => account.source === 'MYFXBOOK');
+  const balanceChangeSummary = summarizeByCurrency((account) => account.netProfit, (account) => account.profitAvailable !== false, novaAccounts);
+  const providerProfitSummary = summarizeByCurrency((account) => account.netProfit, (account) => account.profitAvailable !== false, myfxbookAccounts);
   const formatSummaryAmount = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const handleConfirmDelete = async () => {
@@ -333,8 +337,9 @@ export const AccountsScreen: React.FC<{
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3">
             {[
-              { label: 'Total Allocation', summary: allocationSummary, hint: 'Sum of available starting balances', tint: 'text-white' },
-              { label: 'Overall Profit', summary: profitSummary, hint: 'Combined account balance change', tint: 'text-emerald-200' },
+              { label: 'Total Allocation', summary: allocationSummary, hint: 'Available starting balances; grouped by currency', tint: 'text-white' },
+              ...(novaAccounts.length ? [{ label: 'NOVA account balance change', summary: balanceChangeSummary, hint: 'Current balance minus saved starting balance', tint: 'text-emerald-200' }] : []),
+              ...(myfxbookAccounts.length ? [{ label: 'Myfxbook account profit', summary: providerProfitSummary, hint: 'Provider-reported account metric; distinct from filtered realized P&L', tint: 'text-cyan-200' }] : []),
             ].map(({ label, summary, hint, tint }) => (
               <div key={label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3.5">
                 <p className="text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{label}</p>
@@ -380,12 +385,13 @@ export const AccountsScreen: React.FC<{
                 catch { return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (acc.currency ? ' ' + acc.currency : ''); }
               };
               return <article key={acc.id} className={'overview-account-card relative flex flex-col justify-between ' + (isActive ? 'active' : '')}>
-                <div><div className='mb-3 flex items-center justify-between'><span className='rounded-full border border-cyan-300/20 bg-cyan-300/[.06] px-2.5 py-1 text-[9px] font-bold uppercase text-cyan-200'>{acc.accountType || 'Myfxbook'}</span>{isActive && <span className='rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-1 text-[9px] text-violet-200'>ACTIVE</span>}</div>
+                <div><div className='mb-3 flex flex-wrap items-center justify-between gap-2'><div className='flex flex-wrap gap-1.5'><span className='rounded-full border border-cyan-300/20 bg-cyan-300/[.06] px-2.5 py-1 text-[9px] font-bold uppercase text-cyan-200'>{acc.classification?.replaceAll('_', ' ') || acc.accountType || 'Myfxbook'}</span>{acc.phaseConfigured && <span className='rounded-full border border-violet-300/20 bg-violet-300/[.06] px-2.5 py-1 text-[9px] font-semibold uppercase text-violet-200'>{acc.phase}</span>}</div>{isActive && <span className='rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-1 text-[9px] text-violet-200'>ACTIVE</span>}</div>
                 <h3 className='truncate text-base font-bold text-white'>{acc.name}</h3><p className='mt-1 truncate text-xs text-slate-400'>Myfxbook · {acc.ref}</p>
                 <div className='my-4 grid grid-cols-2 gap-3'><div className='terminal-glass-subtle min-w-0 rounded-xl border border-white/[.05] p-3'><span className='text-[9px] uppercase text-slate-400'>Balance</span><p className='mt-1 truncate text-sm font-bold text-white'>{amount(acc.balanceAvailable === false ? undefined : acc.currentBalance)}</p></div><div className='terminal-glass-subtle min-w-0 rounded-xl border border-white/[.05] p-3'><span className='text-[9px] uppercase text-slate-400'>Equity</span><p className='mt-1 truncate text-sm font-bold text-cyan-100'>{amount(acc.equityAvailable === false ? undefined : acc.liveEquity)}</p></div></div>
-                <p className='mb-4 text-[10px] text-slate-500'>{acc.currency || 'Currency unavailable'} · read only</p></div>
+                <p className='mb-2 flex items-center justify-between gap-2 text-[10px] text-slate-500'><span>Myfxbook account profit</span><strong className={`truncate font-semibold ${acc.profitAvailable === false ? 'text-slate-500' : acc.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{acc.profitAvailable === false ? 'Unavailable' : amount(acc.netProfit)}</strong></p>{acc.targetConfigured && <p className='mb-2 flex items-center justify-between gap-2 text-[10px] text-slate-500'><span>Personal target</span><strong className='truncate font-semibold text-violet-200'>{amount(acc.targetProfit)}</strong></p>}<p className='mb-4 text-[10px] text-slate-500'>{acc.currency || 'Currency unavailable'} · provider values are read only</p></div>
                 <button type='button' onClick={() => onSelectAccount(acc.id)} className='min-h-9 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 hover:bg-violet-500/20'>{isActive ? 'Active account' : 'Set as active'}</button>
                 {onViewDetails && <button type='button' onClick={() => onViewDetails(acc.id)} className='mt-2 min-h-9 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300'>View details</button>}
+                {onViewDetails && <button type='button' onClick={() => { setEditingAccount(acc); }} className='mt-2 min-h-9 rounded-lg border border-violet-400/20 px-3 py-2 text-xs text-violet-200'>Edit NOVA settings</button>}
                 {onNavigateToJournal && <button type='button' onClick={() => onNavigateToJournal(acc.id)} className='mt-2 min-h-9 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300'>View history</button>}
               </article>;
             }
@@ -648,13 +654,13 @@ export const AccountsScreen: React.FC<{
           <section className="terminal-glass max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-blue-300/15 p-5 shadow-2xl sm:p-7" role="dialog" aria-modal="true" aria-label={`${detail.name} details`}>
             <div className="flex items-start justify-between gap-3 border-b border-white/[.08] pb-4"><div><p className="font-label-tech text-[10px] uppercase tracking-[.2em] text-violet-300">Account details</p><h2 className="mt-1 text-xl font-semibold text-white">{detail.name}</h2><div className="mt-2 flex flex-wrap gap-2"><span className="rounded-full border border-violet-400/25 bg-violet-400/10 px-2.5 py-1 text-[10px] font-bold text-violet-200">{category}</span>{category === 'PROP FIRM' && challenge?.stage && <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-bold text-cyan-200">{challenge.stage.replaceAll('_', ' ')}</span>}</div></div><button type="button" onClick={() => setDetailsAccountId(null)} aria-label="Close account details" className="rounded-lg border border-white/10 px-3 py-2 text-slate-400">×</button></div>
             <div className="grid gap-3 py-4 sm:grid-cols-2">{[
-              ['Provider', detail.provider || 'Unavailable'], ['Account ID', detail.shortRef], ['Connection', detail.connectionStatus || 'Unavailable'], ['MT5 mode', detail.connectionMode || 'Not supplied by connector'], ['Current balance', detail.balanceAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Current equity', detail.equityAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.liveEquity.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Original starting balance', detail.startingBalanceAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.baseBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })], [detail.source === 'MYFXBOOK' ? 'Provider reported profit' : 'Balance change since start', detail.profitAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Recorded closed trades', detail.tradeCount ?? detailTrades.length], ['Recorded realized P&L', `${detail.currency || ''} ${detailRealized.toLocaleString('en-US', { minimumFractionDigits: 2 })}`],
+              ['Provider', detail.provider || 'Unavailable'], ['Account ID', detail.shortRef], ['Data access', detail.source === 'MYFXBOOK' ? 'Read only' : detail.connectionStatus || 'Unavailable'], [detail.source === 'MYFXBOOK' ? 'Provider account mode' : 'MT5 mode', detail.connectionMode || 'Not supplied by provider'], ['Current balance', detail.balanceAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Current equity', detail.equityAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.liveEquity.toLocaleString('en-US', { minimumFractionDigits: 2 })], [detail.source === 'MYFXBOOK' ? 'Manual starting balance' : 'Original starting balance', detail.startingBalanceAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.baseBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })], [detail.source === 'MYFXBOOK' ? 'Provider reported account profit' : 'Balance change since start', detail.profitAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Recorded closed trades', detailTrades.length], ['Recorded trade realized P&L', `${detail.currency || ''} ${detailRealized.toLocaleString('en-US', { minimumFractionDigits: 2 })}`],
             ].map(([label, value]) => <div key={label} className="rounded-xl border border-white/[.07] bg-black/15 p-3"><span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span><strong className="mt-1 block break-words text-sm text-slate-100">{value}</strong></div>)}</div>
             {category === 'PROP FIRM' && <div className="mb-4 rounded-xl border border-violet-400/15 bg-violet-400/[.025] p-4"><h3 className="text-sm font-semibold text-white">Configured challenge settings</h3><p className="mt-1 text-[11px] text-slate-400">User-provided references only; NOVA does not verify or enforce the firm's rules.</p><div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-300 sm:grid-cols-3">{[
               ['Firm', detail.accountSettings?.prop_firm_name || detail.provider || 'Not configured'], ['Type', challenge?.type?.replaceAll('_', ' ') || 'Not configured'], ['Stage', challenge?.stage?.replaceAll('_', ' ') || 'Not configured'], ['Challenge size', challenge?.size != null ? `${detail.currency || ''} ${challenge.size}` : 'Not configured'], ['Purchase fee', challenge?.fee != null ? `${detail.currency || ''} ${challenge.fee}` : 'Not configured'], ['Phase 1 target', challenge?.phase1_target_percent != null ? `${challenge.phase1_target_percent}%` : 'Not configured'], ['Phase 2 target', challenge?.phase2_target_percent != null ? `${challenge.phase2_target_percent}%` : 'Not configured'], ['Daily drawdown', challenge?.daily_drawdown_percent != null ? `${challenge.daily_drawdown_percent}%` : 'Not configured'], ['Max drawdown', challenge?.max_drawdown_percent != null ? `${challenge.max_drawdown_percent}%` : 'Not configured'],
             ].map(([label, value]) => <p key={label}><span className="block text-[9px] uppercase tracking-wider text-slate-500">{label}</span><strong className="mt-1 block">{value}</strong></p>)}</div></div>}
             {detail.accountSettings?.notes && <p className="mb-4 rounded-xl border border-white/[.07] p-3 text-sm text-slate-300">{detail.accountSettings.notes}</p>}
-            <div className="flex flex-wrap justify-end gap-3 border-t border-white/[.08] pt-4">{detail.source !== 'MYFXBOOK' && <button type="button" onClick={() => { setAccountToDelete(detail); setDetailsAccountId(null); }} className="rounded-lg border border-rose-500/25 px-4 py-2.5 text-sm text-rose-200">Remove Account</button>}<div className="ml-auto flex gap-2"><button type="button" onClick={() => setDetailsAccountId(null)} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300">Close</button>{detail.source !== 'MYFXBOOK' && <button type="button" onClick={() => { setEditingAccount(detail); setDetailsAccountId(null); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white">Edit Account</button>}</div></div>
+            <div className="flex flex-wrap justify-end gap-3 border-t border-white/[.08] pt-4">{detail.source !== 'MYFXBOOK' && <button type="button" onClick={() => { setAccountToDelete(detail); setDetailsAccountId(null); }} className="rounded-lg border border-rose-500/25 px-4 py-2.5 text-sm text-rose-200">Remove Account</button>}<div className="ml-auto flex gap-2"><button type="button" onClick={() => setDetailsAccountId(null)} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300">Close</button><button type="button" onClick={() => { setEditingAccount(detail); setDetailsAccountId(null); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white">Edit Account</button></div></div>
           </section>
         </div>;
       })()}

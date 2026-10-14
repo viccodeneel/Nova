@@ -1,4 +1,4 @@
-import { PropAccount, TradeExecution } from '../data/terminalData';
+import { AccountSettings, PropAccount, TradeExecution } from '../data/terminalData';
 
 export interface MyfxbookAccount {
   id: string;
@@ -12,6 +12,8 @@ export interface MyfxbookAccount {
   equity?: number;
   profit?: number;
   gain?: number;
+  displayName?: string;
+  accountSettings?: AccountSettings;
   lastUpdateDate?: string;
   sourceUpdatedAt?: string;
 }
@@ -49,6 +51,34 @@ export interface MyfxbookActivityCacheEntry {
 
 export type MyfxbookActivityCache = Record<string, MyfxbookActivityCacheEntry>;
 export const MYFXBOOK_HISTORY_LIMIT = 50;
+export const MYFXBOOK_HISTORY_NOTICE_MS = 1000;
+
+export function formatMyfxbookActivityAmount(value: number, currency?: string): string {
+  const sign = value < 0 ? '−' : '+';
+  const amount = Math.abs(value);
+  try {
+    return sign + (currency
+      ? new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+      : amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  } catch {
+    return `${sign}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${currency ? ` ${currency}` : ''}`;
+  }
+}
+
+export function myfxbookHistoryNoticeCycle(accountId: string, requestId: number, error: MyfxbookRequestError): string {
+  return `${accountId}:${requestId}:${error.status ?? error.message}`;
+}
+
+export function scheduleMyfxbookHistoryNotice(
+  setNotice: (message: string | null) => void,
+  message: string,
+  schedule: typeof setTimeout = setTimeout,
+  cancel: typeof clearTimeout = clearTimeout,
+): () => void {
+  setNotice(message);
+  const timer = schedule(() => setNotice(null), MYFXBOOK_HISTORY_NOTICE_MS);
+  return () => cancel(timer);
+}
 
 export type MyfxbookLoadState = 'loading' | 'authentication-error' | 'provider-error' | 'empty' | 'ready';
 
@@ -91,6 +121,8 @@ export function parseMyfxbookAccountsResponse(value: unknown): MyfxbookAccountsR
       const field = optionalNumber(item[key]);
       if (field !== undefined) account[key] = field;
     }
+  if (typeof item.novaDisplayName === 'string') account.displayName = item.novaDisplayName;
+  if (isRecord(item.novaSettings)) account.accountSettings = item.novaSettings as AccountSettings;
     if (typeof item.demo === 'boolean') account.demo = item.demo;
     return account;
   });
@@ -104,20 +136,34 @@ export function parseMyfxbookAccountsResponse(value: unknown): MyfxbookAccountsR
 }
 
 export function mapMyfxbookAccountToDashboard(account: MyfxbookAccount): PropAccount {
+  const configuredStartingBalance = account.accountSettings?.starting_balance;
+  const hasConfiguredStartingBalance = typeof configuredStartingBalance === 'number' && Number.isFinite(configuredStartingBalance) && configuredStartingBalance >= 0;
+  const challenge = account.accountSettings?.challenge;
+  const stage = challenge?.stage;
+  const configuredTargetPercent = stage === 'PHASE_2' ? challenge?.phase2_target_percent : challenge?.phase1_target_percent;
+  const targetBasis = challenge?.size ?? (hasConfiguredStartingBalance ? configuredStartingBalance : undefined);
+  const configuredTarget = typeof configuredTargetPercent === 'number' && typeof targetBasis === 'number'
+    ? targetBasis * configuredTargetPercent / 100
+    : 0;
   return {
     id: `myfxbook:${account.id}`, source: 'MYFXBOOK', providerAccountId: account.id,
-    name: account.name || 'Myfxbook account', currency: account.currency,
+    name: account.displayName || account.name || 'Myfxbook account', currency: account.currency,
     balanceAvailable: account.balance !== undefined, equityAvailable: account.equity !== undefined,
-    startingBalanceAvailable: false, profitAvailable: account.profit !== undefined,
+    startingBalanceAvailable: hasConfiguredStartingBalance, profitAvailable: account.profit !== undefined,
     provider: 'Myfxbook', accountType: typeof account.demo === 'boolean' ? (account.demo ? 'Demo' : 'Live') : undefined,
     connectionMode: account.demo === undefined ? null : account.demo ? 'DEMO' : 'REAL',
-    classification: account.demo === undefined ? undefined : account.demo ? 'DEMO' : 'LIVE_BROKERAGE',
+    classification: account.accountSettings?.classification || (account.demo === undefined ? undefined : account.demo ? 'DEMO' : 'LIVE_BROKERAGE'),
+    accountSettings: account.accountSettings,
+    phaseConfigured: Boolean(stage), targetConfigured: typeof configuredTargetPercent === 'number' && targetBasis !== undefined,
     connectionStatus: 'PROVIDER_READ_ONLY', ref: account.mtAccountNumber || account.id,
-    shortRef: account.mtAccountNumber || 'Myfxbook', bridge: 'Myfxbook', phase: '',
-    baseBalance: 0, currentBalance: account.balance ?? 0, liveEquity: account.equity ?? 0,
-    floatingPnl: 0, netProfit: account.profit ?? 0, roiPercent: 0, targetProfit: 0,
-    targetPercent: 0, passThreshold: 0, dailyLimit: 0, currentDailyDrawdown: 0,
-    maxLossLimit: 0, currentMaxDrawdown: 0, peakWater: account.balance ?? 0,
+    shortRef: account.mtAccountNumber || 'Myfxbook', bridge: 'Myfxbook', phase: stage?.replaceAll('_', ' ') || '',
+    baseBalance: hasConfiguredStartingBalance ? configuredStartingBalance : 0, currentBalance: account.balance ?? 0, liveEquity: account.equity ?? 0,
+    floatingPnl: 0, netProfit: account.profit ?? 0, roiPercent: 0, targetProfit: configuredTarget,
+    targetPercent: configuredTargetPercent ?? 0, passThreshold: targetBasis === undefined ? 0 : targetBasis + configuredTarget,
+    dailyLimit: typeof challenge?.daily_drawdown_percent === 'number' && targetBasis !== undefined ? targetBasis * challenge.daily_drawdown_percent / 100 : 0,
+    currentDailyDrawdown: 0,
+    maxLossLimit: typeof challenge?.max_drawdown_percent === 'number' && targetBasis !== undefined ? targetBasis * challenge.max_drawdown_percent / 100 : 0,
+    currentMaxDrawdown: 0, peakWater: account.balance ?? 0,
     status: 'SAFE', isRealConnected: undefined, tradeCount: undefined,
   };
 }
@@ -135,7 +181,10 @@ function tradeSide(value: string | undefined): TradeExecution['side'] {
 
 export function myfxbookRealizedTradePnl(record: MyfxbookHistoryTrade): number | undefined {
   if (record.profit === undefined) return undefined;
-  return record.profit + (record.commission ?? 0) + (record.interest ?? 0) + (record.swap ?? 0);
+  // Myfxbook's documented history schema reports financing as `interest`.
+  // Some adapters also expose the same financing as `swap`; use it only as a
+  // fallback so a response containing both names cannot count it twice.
+  return record.profit + (record.commission ?? 0) + (record.interest ?? record.swap ?? 0);
 }
 
 function mapProviderTrade(
@@ -149,8 +198,17 @@ function mapProviderTrade(
   const open = type === 'open' ? record as MyfxbookOpenTrade : undefined;
   const direction = record.direction;
   const side = tradeSide(direction);
+  const normalizedAction = direction?.trim().toLowerCase();
+  const balanceMovement = type === 'history' && normalizedAction === 'balance' && history?.profit !== undefined && history.profit !== 0;
+  const activityType: TradeExecution['activityType'] = type === 'open' ? 'TRADE'
+    : normalizedAction === 'deposit' || (balanceMovement && (history?.profit || 0) > 0) ? 'DEPOSIT'
+      : normalizedAction === 'withdrawal' || (balanceMovement && (history?.profit || 0) < 0) ? 'WITHDRAWAL'
+        : Boolean(record.symbol) && side !== 'UNKNOWN' ? 'TRADE' : 'OTHER';
   const isTradingRecord = Boolean(record.symbol) && side !== 'UNKNOWN';
-  const pnl = isTradingRecord
+  const transactionAmount = activityType === 'DEPOSIT' && history?.profit !== undefined ? Math.abs(history.profit)
+    : activityType === 'WITHDRAWAL' && history?.profit !== undefined ? -Math.abs(history.profit)
+      : undefined;
+  const pnl = activityType === 'TRADE' && isTradingRecord
     ? history ? myfxbookRealizedTradePnl(history) : open?.floatingProfit === undefined ? undefined : open.floatingProfit + (open.swap ?? 0)
     : undefined;
   const pnlAvailable = pnl !== undefined;
@@ -162,12 +220,13 @@ function mapProviderTrade(
   return {
     id: `myfxbook:${account.providerAccountId}:${type}:${stableTradeHash(identity)}`,
     accountId: account.id, source: 'MYFXBOOK', tradeStatus: type === 'open' ? 'OPEN' : 'CLOSED',
+    activityType, ...(transactionAmount === undefined ? {} : { activityAmount: transactionAmount }),
     pnlAvailable, rValueAvailable: false,
     openedAt: record.openTime, closedAt: history?.closeTime,
     stopLoss: record.stopLoss === undefined ? undefined : String(record.stopLoss),
     takeProfit: record.takeProfit === undefined ? undefined : String(record.takeProfit),
     time: history?.closeTime || record.openTime || 'Time unavailable',
-    instrument: record.symbol || 'Symbol unavailable', side,
+    instrument: activityType === 'DEPOSIT' ? 'Deposit' : activityType === 'WITHDRAWAL' ? 'Withdrawal' : activityType === 'OTHER' && direction?.trim() ? direction.trim() : record.symbol || 'Symbol unavailable', side,
     entry: record.entryPrice === undefined ? '' : String(record.entryPrice),
     exit: history?.exitPrice === undefined ? undefined : String(history.exitPrice),
     lots: record.size === undefined ? undefined : String(record.size), outcome,

@@ -15,6 +15,8 @@ export interface TradeExecution {
   pnlAvailable?: boolean;
   rValueAvailable?: boolean;
   sourceTimestampSemantics?: string;
+  activityType?: 'TRADE' | 'DEPOSIT' | 'WITHDRAWAL' | 'OTHER';
+  activityAmount?: number;
   openedAt?: string;
   closedAt?: string;
   stopLoss?: string;
@@ -103,6 +105,7 @@ export type ChallengeType = 'ONE_STEP' | 'TWO_STEP' | 'INSTANT_FUNDING';
 export type ChallengeStage = 'PHASE_1' | 'PHASE_2' | 'FUNDED' | 'INSTANT_FUNDED' | 'EVALUATION';
 export interface AccountSettings {
   classification?: AccountClassification;
+  starting_balance?: number | null;
   notes?: string | null;
   prop_firm_name?: string | null;
   challenge?: {
