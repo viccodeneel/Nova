@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createMyfxbookRouter } from '../routes/myfxbook.ts';
-import type { SavedMyfxbookAccountSettings, MyfxbookAccountSettingsStore } from '../services/myfxbookAccountSettings.ts';
+import { createMyfxbookAccountSettingsStore, type MyfxbookSettingsDatabase, type SavedMyfxbookAccountSettings, type MyfxbookAccountSettingsStore } from '../services/myfxbookAccountSettings.ts';
 import { createMyfxbookService, MyfxbookServiceError } from '../services/myfxbookService.ts';
 
 function responseSink() {
@@ -83,6 +83,20 @@ test('provider verification and database persistence failures return distinct sa
   assert.equal(settingsResult.statusCode, 503);
   assert.equal((settingsResult.body as { error: string }).error, 'NOVA could not save these account settings. Check the database migration and try again.');
   assert.doesNotMatch(JSON.stringify(settingsResult.body), /private database host|42P01/);
+});
+
+test('database settings upsert explicitly types the provider ID JSON key as text', async () => {
+  const statements: Array<{ sql: string; params?: unknown[] }> = [];
+  const fakeQuery = async (sql: string, params?: unknown[]) => {
+    statements.push({ sql, params });
+    return { rows: [], rowCount: 1 };
+  };
+  const database = { isConnected: () => true, query: fakeQuery as unknown as MyfxbookSettingsDatabase['query'] };
+  const store = createMyfxbookAccountSettingsStore(database);
+  await store.save('321', { account_name: 'Funded account', account_settings: { classification: 'PROP_FIRM' } });
+  const upsert = statements.at(-1);
+  assert.match(upsert?.sql || '', /jsonb_build_object\(\$1::text,\s*\$2::jsonb\)/);
+  assert.deepEqual(upsert?.params, ['321', JSON.stringify({ account_name: 'Funded account', account_settings: { classification: 'PROP_FIRM' } })]);
 });
 
 test('Myfxbook account settings reject unknown accounts, invalid challenge combinations, and connection misclassification', async () => {
