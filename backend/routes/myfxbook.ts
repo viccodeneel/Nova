@@ -54,6 +54,10 @@ export function createMyfxbookRouter(
 ) {
   const router = Router();
   router.use(requireStrictAuth);
+  // The authenticated dashboard fetches this list before allowing account
+  // editing. Reuse its server-verified provider metadata for the subsequent
+  // NOVA-only settings save instead of requiring a second Myfxbook login.
+  const verifiedAccounts = new Map<string, ProviderAccount>();
 
   const respondWithSafeError = (error: unknown, res: Response) => {
     const code = error instanceof MyfxbookServiceError ? error.code : 'UPSTREAM_FAILURE';
@@ -83,6 +87,8 @@ export function createMyfxbookRouter(
   router.get('/accounts', async (_req: Request, res: Response) => {
     try {
       const result = await service.getAccounts();
+      verifiedAccounts.clear();
+      for (const account of result.accounts) verifiedAccounts.set(account.id, account);
       const saved = await settingsStore.getAll();
       res.json({ success: true, data: { ...result, accounts: result.accounts.map((account) => ({
         ...account,
@@ -94,11 +100,19 @@ export function createMyfxbookRouter(
   });
 
   router.patch('/accounts/:id/settings', async (req: Request, res: Response) => {
+    let stage: 'provider-verification' | 'settings-read' | 'settings-write' = 'provider-verification';
     try {
       const accountId = req.params.id;
       if (!/^\d{1,20}$/.test(accountId)) return res.status(400).json({ success: false, error: 'A valid Myfxbook account ID is required.' });
-      const accounts = await service.getAccounts();
-      const providerAccount = accounts.accounts.find((account) => account.id === accountId);
+      const shapeError = validateSettings(req.body);
+      if (shapeError) return res.status(400).json({ success: false, error: shapeError });
+      let providerAccount = verifiedAccounts.get(accountId);
+      if (!providerAccount) {
+        const accounts = await service.getAccounts();
+        verifiedAccounts.clear();
+        for (const account of accounts.accounts) verifiedAccounts.set(account.id, account);
+        providerAccount = verifiedAccounts.get(accountId);
+      }
       if (!providerAccount) return res.status(404).json({ success: false, error: 'The selected account is not available for this NOVA owner.' });
       const validationError = validateSettings(req.body, providerAccount);
       if (validationError) return res.status(400).json({ success: false, error: validationError });
@@ -112,15 +126,30 @@ export function createMyfxbookRouter(
       };
       const challenge = incoming.challenge;
       if (challenge && typeof challenge === 'object' && !Array.isArray(challenge)) {
+        stage = 'settings-read';
         const existing = (await settingsStore.getAll())[accountId]?.account_settings.challenge;
         const allowedChallengeFields = ['type', 'stage', 'fee', 'size', 'phase1_target_percent', 'phase2_target_percent', 'daily_drawdown_percent', 'max_drawdown_percent', 'minimum_trading_days'];
         const submitted = Object.fromEntries(Object.entries(challenge as Record<string, unknown>).filter(([key]) => allowedChallengeFields.includes(key)));
         settings.challenge = { ...(existing && typeof existing === 'object' ? existing : {}), ...submitted };
       }
+      stage = 'settings-write';
       await settingsStore.save(accountId, { account_name: body.account_name.trim(), account_settings: settings });
       res.json({ success: true, data: { id: accountId, novaDisplayName: body.account_name.trim(), novaSettings: settings } });
     } catch (error) {
-      respondWithSafeError(error, res);
+      if (error instanceof MyfxbookServiceError) {
+        if (stage === 'provider-verification') {
+          const status = error.code === 'NOT_CONFIGURED' ? 503 : error.code === 'UPSTREAM_TIMEOUT' ? 504 : 502;
+          return res.status(status).json({ success: false, error: 'Could not verify the selected account with Myfxbook. Refresh the account list and try again.' });
+        }
+        return respondWithSafeError(error, res);
+      }
+      const details = error as { name?: unknown; code?: unknown };
+      console.error('[Myfxbook settings] persistence failed', {
+        stage,
+        errorType: typeof details?.name === 'string' ? details.name : 'Error',
+        databaseCode: typeof details?.code === 'string' ? details.code : undefined,
+      });
+      res.status(503).json({ success: false, error: 'NOVA could not save these account settings. Check the database migration and try again.' });
     }
   });
 
