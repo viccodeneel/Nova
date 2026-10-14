@@ -19,7 +19,7 @@ export const Avatar: React.FC<{ profile: Profile; className?: string }> = ({ pro
     : <div className={`${className} flex items-center justify-center bg-gradient-to-br from-cyan-500 to-violet-600 text-xs font-bold text-white`}>{(profile.display_name || 'N').slice(0, 1).toUpperCase()}</div>;
 
 const Card: React.FC<{ title: string; hint?: string; children: React.ReactNode }> = ({ title, hint, children }) => (
-  <section className="hud-panel p-5 sm:p-6">
+  <section className="hud-panel min-w-0 p-5 sm:p-6">
     <h2 className="text-base font-semibold text-white">{title}</h2>
     {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     <div className="mt-4">{children}</div>
@@ -138,14 +138,15 @@ export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accou
         <Msg m={pm} />
       </Card>
 
-      <Card title="Preferences" hint="Currency is a display label for Net Worth. Values are not converted.">
-        <select value={profile.currency} onChange={(e) => void save({ currency: e.target.value }, 'Currency saved.')} aria-label="Currency" className={inputCls}>
-          {['USD', 'GHS', 'EUR', 'GBP'].map((c) => <option key={c}>{c}</option>)}
-        </select>
-      </Card>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-5">
+        <Card title="Preferences" hint="Currency is a display label for Net Worth. Values are not converted.">
+          <select value={profile.currency} onChange={(e) => void save({ currency: e.target.value }, 'Currency saved.')} aria-label="Currency" className={inputCls}>
+            {['USD', 'GHS', 'EUR', 'GBP'].map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </Card>
 
-      {wake && (
-        <Card title="Voice" hint="Say “Hey NOVA” on any tab and NOVA slides in from the right.">
+        {wake && (
+          <Card title="Wake phrase" hint="Say “Hey NOVA” on any tab and NOVA slides in from the right.">
           <label className="flex cursor-pointer items-center justify-between gap-4">
             <span className="text-sm text-white">Wake word</span>
             <input type="checkbox" role="switch" checked={wake.enabled} disabled={!wake.supported} onChange={(e) => wake.onChange(e.target.checked)} className="h-5 w-5 accent-cyan-400" />
@@ -158,10 +159,11 @@ export const SettingsPanel: React.FC<Props> = ({ profile, onProfileChange, accou
           <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
             While on, your browser keeps the microphone open and streams audio to its speech service (Google, for Chrome) to detect the wake word. It only works with this tab open, and it won’t work on a freshly loaded page until you click once.
           </p>
-        </Card>
-      )}
+          </Card>
+        )}
 
-      <VoiceCard />
+        <VoiceCard />
+      </div>
       <MemoryCard />
 
       <Card title="Password" hint="At least 12 characters. Other signed-in devices stay signed in until their session expires (12 hours).">

@@ -52,6 +52,8 @@ export interface PropAccount {
   id: string;
   name: string;
   currency?: string;
+  startingBalanceAvailable?: boolean;
+  profitAvailable?: boolean;
   provider?: string;
   accountType?: string;
   connectionMode?: 'REAL' | 'DEMO' | 'CONTEST' | null;

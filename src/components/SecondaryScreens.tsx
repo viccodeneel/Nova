@@ -21,14 +21,9 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
 
   const wins = filteredTrades.filter((t) => t.outcome === 'WIN');
   const losses = filteredTrades.filter((t) => t.outcome === 'LOSS');
-  const winRate = filteredTrades.length > 0 ? ((wins.length / filteredTrades.length) * 100).toFixed(1) : '0.0';
+  const winRate = filteredTrades.length > 0 ? ((wins.length / filteredTrades.length) * 100).toFixed(1) : null;
 
   const fullDlmTrades = filteredTrades.filter((t) => t.disciplineScore === 100);
-  const fullDlmWins = fullDlmTrades.filter((t) => t.outcome === 'WIN');
-  const dlmWinRate =
-    fullDlmTrades.length > 0
-      ? ((fullDlmWins.length / fullDlmTrades.length) * 100).toFixed(1)
-      : '--';
 
   const totalWinR = wins.reduce((acc, t) => acc + t.rValue, 0);
   const avgWinR = wins.length > 0 ? `+${(totalWinR / wins.length).toFixed(2)}R` : '--';
@@ -70,75 +65,43 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
           <p className="overview-hero-sub">Explore realized results and execution patterns from your recorded trades.</p>
         </div>
       </section>
-      <div className="overview-panel flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
-        <div>
-          <h2 className="font-headline-sm text-base font-semibold text-white">Trade performance</h2>
-          <p className="mt-1 text-xs text-slate-400">Filter results by the session recorded on each trade.</p>
-        </div>
-        <div className="flex items-center bg-black/40 border border-white/[0.08] p-1 rounded-xl">
-          {(['ALL', 'OVERLAP', 'LONDON', 'NY'] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setSessionFilter(s)}
-              className={
-                sessionFilter === s
+      <section className="overview-panel p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-headline-sm text-base font-semibold text-white">Performance summary</h2>
+            <p className="mt-1 text-xs text-slate-400">Headline results use the recorded trades matching this session filter.</p>
+          </div>
+          <div className="flex max-w-full flex-wrap items-center rounded-xl border border-white/[0.08] bg-black/40 p-1">
+            {(['ALL', 'OVERLAP', 'LONDON', 'NY'] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={sessionFilter === s}
+                onClick={() => setSessionFilter(s)}
+                className={sessionFilter === s
                   ? 'rounded-lg border border-violet-400/25 bg-violet-500/15 px-3 py-2 text-[10px] font-bold text-violet-200'
-                  : 'rounded-lg px-3 py-2 text-[10px] text-slate-400 hover:text-white'
-              }
-            >
-              {s}
-            </button>
+                  : 'rounded-lg px-3 py-2 text-[10px] text-slate-400 hover:text-white'}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2.5">
+          {[
+            { label: 'Win rate', value: winRate === null ? '—' : `${winRate}%`, detail: `${wins.length} wins · ${losses.length} losses · ${filteredTrades.length - wins.length - losses.length} break even`, tint: 'text-cyan-200' },
+            { label: 'Net profit', value: filteredTrades.length ? `${netProfit < 0 ? '−' : '+'}$${Math.abs(netProfit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—', detail: 'Filtered recorded results', tint: netProfit < 0 ? 'text-rose-300' : 'text-emerald-300' },
+            { label: 'Total trades', value: filteredTrades.length.toLocaleString(), detail: 'Included in this summary', tint: 'text-white' },
+            { label: 'Average winner / loser', value: `${avgWinR} / ${avgLossR}`, detail: 'Recorded R multiples', tint: 'text-violet-200' },
+          ].map((metric) => (
+            <div key={metric.label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3 sm:p-3.5">
+              <p className="truncate text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{metric.label}</p>
+              <p className={`mt-1.5 truncate text-lg font-semibold tabular-nums sm:text-xl ${metric.tint}`}>{metric.value}</p>
+              <p className="mt-1 truncate text-[10px] text-slate-500" title={metric.detail}>{metric.detail}</p>
+            </div>
           ))}
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="overview-panel p-4 sm:p-5">
-          <span className="font-label-tech text-[10px] text-slate-400 uppercase">
-            6/6 DLM Win Rate
-          </span>
-          <div className="font-label-numeric-lg text-2xl font-bold text-emerald-400 mt-1 tabular-nums">
-            {dlmWinRate !== '--' ? `${dlmWinRate}%` : '--'}
-          </div>
-          <span className="font-body-sm text-xs text-slate-400 mt-1 block">
-            {fullDlmTrades.length} trades with 6/6 compliance
-          </span>
-        </div>
-        <div className="overview-panel p-4 sm:p-5">
-          <span className="font-label-tech text-[10px] text-slate-400 uppercase">
-            Overall Win Rate
-          </span>
-          <div className="font-label-numeric-lg text-2xl font-bold text-white mt-1 tabular-nums">
-            {winRate}%
-          </div>
-          <span className="font-body-sm text-xs text-purple-300 mt-1 block">
-            {wins.length} Wins / {filteredTrades.length} Sampled
-          </span>
-        </div>
-        <div className="overview-panel p-4 sm:p-5">
-          <span className="font-label-tech text-[10px] text-slate-400 uppercase">
-            Avg Winner / Loser
-          </span>
-          <div className="font-label-numeric-lg text-2xl font-bold text-cyan-300 mt-1 tabular-nums">
-            {avgWinR} / {avgLossR}
-          </div>
-          <span className="font-body-sm text-xs text-emerald-400 mt-1 block">
-            {filteredTrades.length > 0 ? 'Recorded trade results' : 'Awaiting executions'}
-          </span>
-        </div>
-        <div className="overview-panel p-4 sm:p-5">
-          <span className="font-label-tech text-[10px] text-slate-400 uppercase">
-            SQN (System Quality)
-          </span>
-          <div className="font-label-numeric-lg text-2xl font-bold text-purple-300 mt-1 tabular-nums">
-            —
-          </div>
-          <span className="font-body-sm text-xs text-slate-400 mt-1 block">
-            Not currently calculated
-          </span>
-        </div>
-      </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
         <div className="overview-panel p-4 sm:p-5 xl:col-span-7">
@@ -286,7 +249,28 @@ export const AccountsScreen: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
 
-  const totalAllocation = accounts.reduce((acc, a) => acc + a.baseBalance, 0);
+  const summarizeByCurrency = (getValue: (account: PropAccount) => number, isAvailable: (account: PropAccount) => boolean) => {
+    const totals = new Map<string, number>();
+    const unclassified: Array<{ label: string; value: number }> = [];
+    let unavailable = 0;
+    for (const account of accounts) {
+      const value = getValue(account);
+      if (!isAvailable(account) || !Number.isFinite(value)) {
+        unavailable += 1;
+        continue;
+      }
+      const currency = account.currency?.trim().toUpperCase();
+      if (currency) totals.set(currency, (totals.get(currency) || 0) + value);
+      else unclassified.push({ label: `${account.name} · currency unavailable`, value });
+    }
+    return {
+      totals: [...totals].map(([label, value]) => ({ label, value })).concat(unclassified),
+      unavailable,
+    };
+  };
+  const allocationSummary = summarizeByCurrency((account) => account.baseBalance, (account) => account.startingBalanceAvailable !== false);
+  const profitSummary = summarizeByCurrency((account) => account.netProfit, (account) => account.profitAvailable !== false);
+  const formatSummaryAmount = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const handleConfirmDelete = async () => {
     if (accountToDelete && !deleting) {
@@ -337,32 +321,41 @@ export const AccountsScreen: React.FC<{
           <p className="overview-hero-sub">Manage your connected trading accounts and review their synced records.</p>
         </div>
       </section>
-      <div className="overview-panel flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="font-headline-sm text-base font-semibold text-white">Trading accounts</span>
-            <span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2.5 py-1 font-label-tech text-[10px] font-bold text-violet-200">
-              {accounts.length} {accounts.length === 1 ? 'ACCOUNT' : 'ACCOUNTS'}
-            </span>
-          </div>
-          <span className="mt-1 block text-xs text-slate-400">
-            Review account status, current balances, and recorded trade history
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="rounded-xl border border-emerald-400/15 bg-emerald-500/[.06] px-3.5 py-2 font-label-numeric-md text-xs font-semibold tabular-nums text-emerald-200 sm:text-sm">
-            Starting balances: ${totalAllocation.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+      <section className="overview-panel p-4 sm:p-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h2 className="font-headline-sm text-base font-semibold text-white">Account Center</h2>
+              <span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2.5 py-1 font-label-tech text-[10px] font-bold text-violet-200">
+                {accounts.length} {accounts.length === 1 ? 'ACCOUNT' : 'ACCOUNTS'}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">Starting balance and balance change, grouped by each account’s currency.</p>
+            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3">
+              {[
+                { label: 'Total Allocation', summary: allocationSummary, hint: 'Sum of available starting balances', tint: 'text-white' },
+                { label: 'Overall Profit', summary: profitSummary, hint: 'Combined account balance change', tint: 'text-emerald-200' },
+              ].map(({ label, summary, hint, tint }) => (
+                <div key={label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3.5">
+                  <p className="text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{label}</p>
+                  {summary.totals.length ? <div className="mt-1.5 space-y-1">
+                    {summary.totals.map((item) => <p key={item.label} className={`truncate text-base font-semibold tabular-nums ${tint}`} title={`${item.label} ${formatSummaryAmount(item.value)}`}>{item.label} {formatSummaryAmount(item.value)}</p>)}
+                  </div> : <p className="mt-1.5 text-base font-semibold text-slate-400">Unavailable</p>}
+                  <p className="mt-1 truncate text-[10px] text-slate-500">{hint}{summary.unavailable ? ` · ${summary.unavailable} unavailable` : ''}</p>
+                </div>
+              ))}
+            </div>
           </div>
           <button
             type="button"
             onClick={onOpenConnectModal}
-            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_5px_18px_rgba(93,68,202,.22)] transition hover:brightness-110"
+            className="flex min-h-10 items-center justify-center gap-1.5 self-start rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_5px_18px_rgba(93,68,202,.22)] transition hover:brightness-110 lg:min-w-36"
           >
             <span className="material-symbols-outlined text-sm">add_link</span>
             <span>Add Account</span>
           </button>
         </div>
-      </div>
+      </section>
 
       {/* Account Cards Grid or Empty State */}
       {accounts.length === 0 ? (
@@ -386,7 +379,7 @@ export const AccountsScreen: React.FC<{
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 xl:gap-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-3 xl:gap-4">
           {accounts.map((acc) => {
             const isActive = acc.id === activeAccountId;
             const pct = Math.min(
@@ -413,8 +406,8 @@ export const AccountsScreen: React.FC<{
               >
                 <div>
                   {/* Top Badges & Delete Button */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="font-label-tech text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 uppercase font-bold">
                         {acc.classification === 'LIVE_BROKERAGE' ? 'LIVE BROKERAGE' : acc.classification === 'DEMO' ? 'DEMO' : 'PROP FIRM'}
                       </span>
@@ -444,10 +437,10 @@ export const AccountsScreen: React.FC<{
                     onClick={() => onSelectAccount(acc.id)}
                     className="cursor-pointer"
                   >
-                    <h3 className="font-headline-sm text-base font-bold text-white group-hover:text-purple-200 transition-colors">
+                    <h3 className="truncate font-headline-sm text-base font-bold text-white group-hover:text-purple-200 transition-colors">
                       {acc.name}
                     </h3>
-                    <span className="font-label-numeric-sm text-xs text-slate-400 block mt-0.5">
+                    <span className="mt-0.5 block truncate font-label-numeric-sm text-xs text-slate-400">
                       {acc.ref} • {acc.provider || acc.bridge}
                     </span>
                   </div>
@@ -542,11 +535,11 @@ export const AccountsScreen: React.FC<{
                     />
                   </div>
 
-                  <div className="flex items-center gap-2 pt-2 border-t border-white/[0.06]">
+                  <div className="grid grid-cols-2 gap-2 border-t border-white/[0.06] pt-3">
                     <button
                       type="button"
                       onClick={() => setDetailsAccountId(acc.id)}
-                      className={`flex-1 py-1.5 px-2 rounded-lg font-label-tech text-xs font-bold transition-all text-center ${
+                      className={`flex min-h-9 min-w-0 items-center justify-center rounded-lg px-2 py-1.5 text-center font-label-tech text-[10px] font-bold transition-all sm:text-xs ${
                         isActive
                           ? 'bg-purple-600/30 border border-purple-500/40 text-purple-200'
                           : 'bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 border border-white/10'
@@ -555,7 +548,7 @@ export const AccountsScreen: React.FC<{
                       {isActive ? 'Active Terminal' : 'Set as Active'}
                     </button>
 
-                    <button type="button" onClick={() => setEditingAccount(acc)} className="py-1.5 px-2.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-200 font-label-tech text-xs font-bold flex items-center gap-1 transition-all" aria-label={`Edit ${acc.name}`}>
+                    <button type="button" onClick={() => setEditingAccount(acc)} className="flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1.5 text-[10px] font-bold text-violet-200 transition-all hover:bg-violet-500/20 sm:text-xs" aria-label={`Edit ${acc.name}`}>
                       <span className="material-symbols-outlined text-sm">edit</span><span>Edit</span>
                     </button>
 
@@ -563,7 +556,7 @@ export const AccountsScreen: React.FC<{
                       type="button"
                       onClick={() => setInspectingAccount(acc)}
                       title="Show past trades taken on this MT5 account"
-                      className="py-1.5 px-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 font-label-tech text-xs font-bold flex items-center gap-1 transition-all"
+                      className="flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-[10px] font-bold text-cyan-300 transition-all hover:bg-cyan-500/20 sm:text-xs"
                     >
                       <span className="material-symbols-outlined text-sm">visibility</span>
                       <span>Show Trades ({accountTrades.length})</span>
@@ -574,7 +567,7 @@ export const AccountsScreen: React.FC<{
                       disabled={syncingAccountId === acc.id}
                       onClick={() => handleSyncDeals(acc.id, 5)}
                       title="Sync past trades taken on this MT5 account"
-                      className="py-1.5 px-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-label-tech text-xs font-bold flex items-center gap-1 transition-all"
+                      className="flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-lg border border-purple-500/30 bg-purple-500/10 px-2 py-1.5 text-[10px] font-bold text-purple-300 transition-all hover:bg-purple-500/20 sm:text-xs"
                     >
                       <span className="material-symbols-outlined text-sm">
                         {syncingAccountId === acc.id ? 'sync' : 'download'}

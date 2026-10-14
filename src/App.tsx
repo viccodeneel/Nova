@@ -76,8 +76,10 @@ const MobileMoreMenu: React.FC<{ activeNav: NavSection; onNavigate: (page: NavSe
 );
 
 function mapBackendAccount(account: any): PropAccount {
-  const startingBalance = Number(account.starting_balance || 0);
-  const currentBalance = Number(account.current_balance || 0);
+  const hasStartingBalance = account.starting_balance != null && !(typeof account.starting_balance === 'string' && !account.starting_balance.trim()) && Number.isFinite(Number(account.starting_balance));
+  const hasCurrentBalance = account.current_balance != null && !(typeof account.current_balance === 'string' && !account.current_balance.trim()) && Number.isFinite(Number(account.current_balance));
+  const startingBalance = hasStartingBalance ? Number(account.starting_balance) : 0;
+  const currentBalance = hasCurrentBalance ? Number(account.current_balance) : 0;
   const currentEquity = Number(account.current_equity || 0);
   const profitTarget = Number(account.prop_phase?.profit_target_amount ?? startingBalance * 0.06);
   const storedSettings = account.account_settings || {};
@@ -108,6 +110,8 @@ function mapBackendAccount(account: any): PropAccount {
     id: account.id,
     name: account.account_name,
     currency: typeof account.currency === 'string' ? account.currency : undefined,
+    startingBalanceAvailable: hasStartingBalance,
+    profitAvailable: hasStartingBalance && hasCurrentBalance,
     provider: typeof account.broker_name === 'string' ? account.broker_name : undefined,
     accountType: typeof account.account_type === 'string' ? account.account_type : undefined,
     connectionMode: account.connection_mode || null,
