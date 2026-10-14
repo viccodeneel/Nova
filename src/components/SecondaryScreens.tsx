@@ -58,48 +58,48 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
 
   return (
     <div className="overview-shell">
-      <section className="overview-hero min-h-[170px]">
-        <div className="overview-hero-content">
+      <section className="overview-hero gap-3 p-4 sm:gap-4 sm:p-5">
+        <div className="relative z-[1] px-1 pt-1">
           <p className="overview-eyebrow">PERFORMANCE WORKSPACE</p>
           <h1 className="overview-value-label text-2xl font-semibold sm:text-3xl">Analytics</h1>
           <p className="overview-hero-sub">Explore realized results and execution patterns from your recorded trades.</p>
         </div>
-      </section>
-      <section className="overview-panel p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="font-headline-sm text-base font-semibold text-white">Performance summary</h2>
-            <p className="mt-1 text-xs text-slate-400">Headline results use the recorded trades matching this session filter.</p>
+        <div className="relative z-[1] rounded-xl border border-blue-300/10 bg-[#070b16]/75 p-3 sm:p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-headline-sm text-base font-semibold text-white">Performance summary</h2>
+              <p className="mt-1 text-xs text-slate-400">Headline results use the recorded trades matching this session filter.</p>
+            </div>
+            <div className="flex max-w-full flex-wrap items-center rounded-xl border border-white/[0.08] bg-black/40 p-1">
+              {(['ALL', 'OVERLAP', 'LONDON', 'NY'] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  aria-pressed={sessionFilter === s}
+                  onClick={() => setSessionFilter(s)}
+                  className={sessionFilter === s
+                    ? 'rounded-lg border border-violet-400/25 bg-violet-500/15 px-3 py-2 text-[10px] font-bold text-violet-200'
+                    : 'rounded-lg px-3 py-2 text-[10px] text-slate-400 hover:text-white'}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex max-w-full flex-wrap items-center rounded-xl border border-white/[0.08] bg-black/40 p-1">
-            {(['ALL', 'OVERLAP', 'LONDON', 'NY'] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                aria-pressed={sessionFilter === s}
-                onClick={() => setSessionFilter(s)}
-                className={sessionFilter === s
-                  ? 'rounded-lg border border-violet-400/25 bg-violet-500/15 px-3 py-2 text-[10px] font-bold text-violet-200'
-                  : 'rounded-lg px-3 py-2 text-[10px] text-slate-400 hover:text-white'}
-              >
-                {s}
-              </button>
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2.5">
+            {[
+              { label: 'Win rate', value: winRate === null ? '—' : `${winRate}%`, detail: `${wins.length} wins · ${losses.length} losses · ${filteredTrades.length - wins.length - losses.length} break even`, tint: 'text-cyan-200' },
+              { label: 'Net profit', value: filteredTrades.length ? `${netProfit < 0 ? '−' : '+'}$${Math.abs(netProfit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—', detail: 'Filtered recorded results', tint: netProfit < 0 ? 'text-rose-300' : 'text-emerald-300' },
+              { label: 'Total trades', value: filteredTrades.length.toLocaleString(), detail: 'Included in this summary', tint: 'text-white' },
+              { label: 'Average winner / loser', value: `${avgWinR} / ${avgLossR}`, detail: 'Recorded R multiples', tint: 'text-violet-200' },
+            ].map((metric) => (
+              <div key={metric.label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3 sm:p-3.5">
+                <p className="truncate text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{metric.label}</p>
+                <p className={`mt-1.5 truncate text-lg font-semibold tabular-nums sm:text-xl ${metric.tint}`}>{metric.value}</p>
+                <p className="mt-1 truncate text-[10px] text-slate-500" title={metric.detail}>{metric.detail}</p>
+              </div>
             ))}
           </div>
-        </div>
-        <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2.5">
-          {[
-            { label: 'Win rate', value: winRate === null ? '—' : `${winRate}%`, detail: `${wins.length} wins · ${losses.length} losses · ${filteredTrades.length - wins.length - losses.length} break even`, tint: 'text-cyan-200' },
-            { label: 'Net profit', value: filteredTrades.length ? `${netProfit < 0 ? '−' : '+'}$${Math.abs(netProfit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—', detail: 'Filtered recorded results', tint: netProfit < 0 ? 'text-rose-300' : 'text-emerald-300' },
-            { label: 'Total trades', value: filteredTrades.length.toLocaleString(), detail: 'Included in this summary', tint: 'text-white' },
-            { label: 'Average winner / loser', value: `${avgWinR} / ${avgLossR}`, detail: 'Recorded R multiples', tint: 'text-violet-200' },
-          ].map((metric) => (
-            <div key={metric.label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3 sm:p-3.5">
-              <p className="truncate text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{metric.label}</p>
-              <p className={`mt-1.5 truncate text-lg font-semibold tabular-nums sm:text-xl ${metric.tint}`}>{metric.value}</p>
-              <p className="mt-1 truncate text-[10px] text-slate-500" title={metric.detail}>{metric.detail}</p>
-            </div>
-          ))}
         </div>
       </section>
 
@@ -314,46 +314,44 @@ export const AccountsScreen: React.FC<{
 
   return (
     <div className="overview-shell">
-      <section className="overview-hero min-h-[170px]">
-        <div className="overview-hero-content">
-          <p className="overview-eyebrow"><span className="status-dot is-online" />ACCOUNT CENTER</p>
-          <h1 className="overview-value-label text-2xl font-semibold sm:text-3xl">Accounts</h1>
-          <p className="overview-hero-sub">Manage your connected trading accounts and review their synced records.</p>
-        </div>
-      </section>
-      <section className="overview-panel p-4 sm:p-5">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+      <section className="overview-hero gap-3 p-4 sm:gap-4 sm:p-5">
+        <div className="relative z-[1] flex flex-wrap items-start justify-between gap-3 px-1 pt-1">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="font-headline-sm text-base font-semibold text-white">Account Center</h2>
-              <span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2.5 py-1 font-label-tech text-[10px] font-bold text-violet-200">
-                {accounts.length} {accounts.length === 1 ? 'ACCOUNT' : 'ACCOUNTS'}
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-slate-400">Starting balance and balance change, grouped by each account’s currency.</p>
-            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3">
-              {[
-                { label: 'Total Allocation', summary: allocationSummary, hint: 'Sum of available starting balances', tint: 'text-white' },
-                { label: 'Overall Profit', summary: profitSummary, hint: 'Combined account balance change', tint: 'text-emerald-200' },
-              ].map(({ label, summary, hint, tint }) => (
-                <div key={label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3.5">
-                  <p className="text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{label}</p>
-                  {summary.totals.length ? <div className="mt-1.5 space-y-1">
-                    {summary.totals.map((item) => <p key={item.label} className={`truncate text-base font-semibold tabular-nums ${tint}`} title={`${item.label} ${formatSummaryAmount(item.value)}`}>{item.label} {formatSummaryAmount(item.value)}</p>)}
-                  </div> : <p className="mt-1.5 text-base font-semibold text-slate-400">Unavailable</p>}
-                  <p className="mt-1 truncate text-[10px] text-slate-500">{hint}{summary.unavailable ? ` · ${summary.unavailable} unavailable` : ''}</p>
-                </div>
-              ))}
-            </div>
+            <p className="overview-eyebrow"><span className="status-dot is-online" />ACCOUNT CENTER</p>
+            <h1 className="overview-value-label text-2xl font-semibold sm:text-3xl">Accounts</h1>
+            <p className="overview-hero-sub">Manage your connected trading accounts and review their synced records.</p>
           </div>
           <button
             type="button"
             onClick={onOpenConnectModal}
-            className="flex min-h-10 items-center justify-center gap-1.5 self-start rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_5px_18px_rgba(93,68,202,.22)] transition hover:brightness-110 lg:min-w-36"
+            className="flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_5px_18px_rgba(93,68,202,.22)] transition hover:brightness-110"
           >
             <span className="material-symbols-outlined text-sm">add_link</span>
             <span>Add Account</span>
           </button>
+        </div>
+        <div className="relative z-[1] rounded-xl border border-blue-300/10 bg-[#070b16]/75 p-3 sm:p-3.5">
+          <div className="mb-2 flex flex-wrap items-center gap-2.5">
+            <h2 className="font-headline-sm text-sm font-semibold text-white">Account Center</h2>
+            <span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2.5 py-1 font-label-tech text-[10px] font-bold text-violet-200">
+              {accounts.length} {accounts.length === 1 ? 'ACCOUNT' : 'ACCOUNTS'}
+            </span>
+            <p className="text-xs text-slate-400">Starting balance and balance change, grouped by each account’s currency.</p>
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3">
+            {[
+              { label: 'Total Allocation', summary: allocationSummary, hint: 'Sum of available starting balances', tint: 'text-white' },
+              { label: 'Overall Profit', summary: profitSummary, hint: 'Combined account balance change', tint: 'text-emerald-200' },
+            ].map(({ label, summary, hint, tint }) => (
+              <div key={label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3.5">
+                <p className="text-[9px] font-semibold uppercase tracking-[.12em] text-slate-500">{label}</p>
+                {summary.totals.length ? <div className="mt-1.5 space-y-1">
+                  {summary.totals.map((item) => <p key={item.label} className={`truncate text-base font-semibold tabular-nums ${tint}`} title={`${item.label} ${formatSummaryAmount(item.value)}`}>{item.label} {formatSummaryAmount(item.value)}</p>)}
+                </div> : <p className="mt-1.5 text-base font-semibold text-slate-400">Unavailable</p>}
+                <p className="mt-1 truncate text-[10px] text-slate-500">{hint}{summary.unavailable ? ` · ${summary.unavailable} unavailable` : ''}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
