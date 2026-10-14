@@ -17,6 +17,8 @@ interface OverviewScreenProps {
   onOpenAccountDetails: (accountId: string) => void;
   activityLoading?: boolean;
   activityError?: string | null;
+  activityLoaded?: boolean;
+  activityHistoryLimit?: number;
 }
 
 type Range = '7d' | '30d' | 'all';
@@ -59,7 +61,7 @@ const MiniLine: React.FC<{ trades: TradeExecution[]; color?: string }> = ({ trad
   return <svg viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true" className="h-8 w-full"><polyline points={points} fill="none" stroke={color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 };
 
-export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, accounts, trades, onSync, onOpenImportModal, onNavigateToJournal, onNavigateToAccounts, onNavigateToAnalytics, onNavigateToFinance, onNavigateToSettings, onSelectAccount, onOpenAccountDetails, activityLoading, activityError }) => {
+export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, accounts, trades, onSync, onOpenImportModal, onNavigateToJournal, onNavigateToAccounts, onNavigateToAnalytics, onNavigateToFinance, onNavigateToSettings, onSelectAccount, onOpenAccountDetails, activityLoading, activityError, activityLoaded, activityHistoryLimit }) => {
   const [range, setRange] = useState<Range>('all');
   const accountTrades = trades.filter((trade) => trade.accountId === activeAccount.id);
   const closedTrades = accountTrades.filter((trade) => trade.tradeStatus !== 'OPEN' && trade.pnlAvailable !== false && (trade.outcome === 'WIN' || trade.outcome === 'LOSS' || trade.outcome === 'BE'));
@@ -67,8 +69,14 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
   const losingTrades = closedTrades.filter((trade) => trade.outcome === 'LOSS').length;
   const realizedPnl = closedTrades.reduce((total, trade) => total + (Number(trade.pnlValue) || 0), 0);
   const winRate = closedTrades.length ? (winningTrades / closedTrades.length) * 100 : null;
-  const floatingPnl = Number(activeAccount.floatingPnl);
-  const hasFloatingPnl = Number.isFinite(floatingPnl);
+  const openTrades = accountTrades.filter((trade) => trade.tradeStatus === 'OPEN' && trade.pnlAvailable !== false);
+  const allOpenTrades = accountTrades.filter((trade) => trade.tradeStatus === 'OPEN');
+  const floatingPnl = activeAccount.source === 'MYFXBOOK'
+    ? openTrades.reduce((total, trade) => total + trade.pnlValue, 0)
+    : Number(activeAccount.floatingPnl);
+  const hasFloatingPnl = activeAccount.source === 'MYFXBOOK'
+    ? activityLoaded === true && allOpenTrades.every((trade) => trade.pnlAvailable !== false)
+    : Number.isFinite(floatingPnl);
   const recentTrades = useMemo(() => [...accountTrades].sort((a, b) => (dateValue(b.time) || 0) - (dateValue(a.time) || 0)).slice(0, 5), [accountTrades]);
   const chartTrades = useMemo(() => {
     const sorted = [...closedTrades].filter((trade) => dateValue(trade.time) !== null).sort((a, b) => (dateValue(a.time) || 0) - (dateValue(b.time) || 0));
@@ -93,13 +101,15 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
       <div className="overview-hero-quote"><span>“Consistency compounds.<br/>One clear decision at a time.”</span><small>— NOVA</small></div>
       <div className="overview-stat-row">
         <div className="overview-stat"><span className="stat-icon violet"><WalletCards size={17}/></span><div><small>Starting balance</small><strong>{activeAccount.startingBalanceAvailable === false ? 'Unavailable' : money(activeAccount.baseBalance, activeAccount.currency)}</strong><em>Selected account</em></div></div>
-        <div className="overview-stat"><span className="stat-icon green"><TrendingUp size={17}/></span><div><small>Realized P&amp;L</small><strong className={realizedPnl >= 0 ? 'positive' : 'negative'}>{closedTrades.length ? money(realizedPnl, activeAccount.currency) : 'Unavailable'}</strong><em>{closedTrades.length} closed trades</em></div></div>
+        <div className="overview-stat"><span className="stat-icon green"><TrendingUp size={17}/></span><div><small>Realized P&amp;L</small><strong className={realizedPnl >= 0 ? 'positive' : 'negative'}>{closedTrades.length ? money(realizedPnl, activeAccount.currency) : 'Unavailable'}</strong><em>{closedTrades.length} closed trades{activityHistoryLimit ? ` · latest up to ${activityHistoryLimit}` : ''}</em></div></div>
         <div className="overview-stat"><span className="stat-icon blue"><ShieldCheck size={17}/></span><div><small>Win rate</small><strong>{winRate === null ? '—' : `${winRate.toFixed(1)}%`}</strong><em>{winningTrades}W / {losingTrades}L</em></div></div>
         <div className="overview-stat"><span className="stat-icon pink"><CircleDollarSign size={17}/></span><div><small>Connected accounts</small><strong>{accounts.length}</strong><em>Balances shown individually</em></div></div>
       </div>
     </section>
 
     <div className="overview-section-heading"><div><p className="overview-kicker">YOUR TRADING OVERVIEW</p><h2>Account snapshot</h2></div><div className="overview-heading-actions"><button type="button" className="overview-icon-button" onClick={onSync} aria-label="Sync account data" title="Sync account data"><RefreshCw size={15}/></button><button type="button" className="overview-outline-button" onClick={onOpenImportModal}>Import statement</button></div></div>
+    {activityError && <p role="alert" className="mb-3 rounded-xl border border-amber-300/15 bg-amber-500/[.05] px-4 py-3 text-xs text-amber-100">{activityError} The last successfully loaded account history remains on screen.</p>}
+    {activityLoading && accountTrades.length > 0 && <p role="status" className="mb-3 rounded-xl border border-violet-300/15 bg-violet-500/[.05] px-4 py-3 text-xs text-violet-200">Refreshing Myfxbook history; showing the last loaded records while it updates.</p>}
 
     <div className="overview-top-grid">
       <section className="overview-panel account-overview-panel">
@@ -150,7 +160,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
     <div className="overview-bottom-grid">
       <section className="overview-panel performance-panel">
         <div className="overview-panel-head"><div><p className="overview-kicker">PERFORMANCE</p><h3>Realized P&amp;L trend</h3></div><div className="overview-range">{([['7d', '7 days'], ['30d', '30 days'], ['all', 'All']] as const).map(([key, label]) => <button type="button" key={key} onClick={() => setRange(key)} className={range === key ? 'active' : ''}>{label}</button>)}</div></div>
-        <div className="performance-summary"><span>Selected account</span><strong className={realizedPnl >= 0 ? 'positive' : 'negative'}>{money(realizedPnl, activeAccount.currency)}</strong><small>{closedTrades.length} closed results</small></div>
+        <div className="performance-summary"><span>Selected account</span><strong className={realizedPnl >= 0 ? 'positive' : 'negative'}>{money(realizedPnl, activeAccount.currency)}</strong><small>{closedTrades.length} closed results{activityHistoryLimit ? ` · Myfxbook supplies at most its latest ${activityHistoryLimit}` : ''}</small></div>
         <TrendLine trades={chartTrades} currency={activeAccount.currency}/>
         <div className="performance-foot"><span>Cumulative realized trade results</span><button type="button" className="overview-link" onClick={onNavigateToAnalytics}>Full analytics <ChevronRight size={14}/></button></div>
       </section>

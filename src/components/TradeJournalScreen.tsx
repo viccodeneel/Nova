@@ -17,6 +17,7 @@ interface TradeJournalScreenProps {
   currency?: string;
   activityLoading?: boolean;
   activityError?: string | null;
+  activityHistoryLimit?: number;
 }
 
 type Period = 'ALL' | '30D' | '90D';
@@ -42,7 +43,7 @@ const JournalChart: React.FC<{ trades: TradeExecution[]; currency?: string }> = 
 
 export const TradeJournalScreen: React.FC<TradeJournalScreenProps> = ({
   trades, selectedTrade, accounts = [], activeAccountId, onSelectAccount, onSelectTrade,
-  onAddTrade, onDeleteTrade, onSyncPastTrades, onOpenImportModal, currency, activityLoading, activityError,
+  onAddTrade, onDeleteTrade, onSyncPastTrades, onOpenImportModal, currency, activityLoading, activityError, activityHistoryLimit,
 }) => {
   const [selectedAccountFilter, setSelectedAccountFilter] = useState(activeAccountId || 'ALL');
   useEffect(() => { if (activeAccountId) setSelectedAccountFilter(activeAccountId); }, [activeAccountId]);
@@ -173,7 +174,7 @@ export const TradeJournalScreen: React.FC<TradeJournalScreenProps> = ({
           {[
             { label: 'Completed trades', value: performanceTrades.length.toLocaleString(), hint: `${wins.length} wins · ${losses.length} losses`, icon: <Activity size={16}/>, tint: 'text-violet-300' },
             { label: 'Win rate', value: winRate === null ? '—' : `${winRate.toFixed(1)}%`, hint: `${breakeven.length} break-even`, icon: <Target size={16}/>, tint: 'text-cyan-300' },
-            { label: 'Realized P&L', value: performanceTrades.length ? money(realizedPnl, currency) : '—', hint: 'Filtered completed trades', icon: <TrendingUp size={16}/>, tint: realizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300' },
+            { label: 'Realized P&L', value: performanceTrades.length ? money(realizedPnl, currency) : '—', hint: activityHistoryLimit ? `Filtered trades · latest up to ${activityHistoryLimit}` : 'Filtered completed trades', icon: <TrendingUp size={16}/>, tint: realizedPnl >= 0 ? 'text-emerald-300' : 'text-rose-300' },
             { label: 'Average result', value: averageR === null ? '—' : `${averageR >= 0 ? '+' : ''}${averageR.toFixed(2)}R`, hint: averageWin === null ? 'Average win unavailable' : `Avg win ${money(averageWin, currency)}`, icon: <Trophy size={16}/>, tint: 'text-amber-300' },
           ].map((metric) => <div key={metric.label} className="rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3.5 sm:p-4"><div className={`flex items-center gap-2 text-[10px] uppercase tracking-[.12em] text-slate-500 ${metric.tint}`}>{metric.icon}<span className="text-slate-400">{metric.label}</span></div><div className="mt-2 truncate text-lg font-semibold tabular-nums text-white sm:text-xl">{metric.value}</div><div className="mt-1 truncate text-[10px] text-slate-500">{metric.hint}</div></div>)}
         </div>
@@ -183,7 +184,7 @@ export const TradeJournalScreen: React.FC<TradeJournalScreenProps> = ({
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,.8fr)]">
         <section className="rounded-2xl border border-blue-300/15 bg-[#080d19]/80 p-4 sm:p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-white">Realized performance</h2><p className="mt-1 text-xs text-slate-500">Calculated from the trades visible under the current filters.</p></div><div className="flex rounded-lg border border-white/[.07] bg-black/20 p-1">{(['ALL', '30D', '90D'] as const).map((value) => <button key={value} type="button" onClick={() => setPeriod(value)} className={`rounded-md px-3 py-1.5 text-[10px] font-semibold transition ${period === value ? 'bg-violet-500/20 text-violet-200' : 'text-slate-500 hover:text-white'}`}>{value === 'ALL' ? 'All time' : value}</button>)}</div></div>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-white">Realized performance</h2><p className="mt-1 text-xs text-slate-500">Calculated from the trades visible under the current filters.{activityHistoryLimit ? ` Myfxbook supplies up to its latest ${activityHistoryLimit} transactions, so older results may be absent.` : ''}</p></div><div className="flex rounded-lg border border-white/[.07] bg-black/20 p-1">{(['ALL', '30D', '90D'] as const).map((value) => <button key={value} type="button" onClick={() => setPeriod(value)} className={`rounded-md px-3 py-1.5 text-[10px] font-semibold transition ${period === value ? 'bg-violet-500/20 text-violet-200' : 'text-slate-500 hover:text-white'}`}>{value === 'ALL' ? 'All time' : value}</button>)}</div></div>
           <JournalChart trades={performanceTrades} currency={currency}/>
         </section>
         <section className="rounded-2xl border border-blue-300/15 bg-[#080d19]/80 p-4 sm:p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-semibold text-white">Trade outcomes</h2><p className="mt-1 text-xs text-slate-500">Distribution · filtered records</p></div><span className="rounded-lg border border-white/[.07] bg-black/20 px-2 py-1 text-[10px] text-slate-400">{performanceTrades.length} trades</span></div>{performanceTrades.length ? <><div className="flex h-3 overflow-hidden rounded-full bg-white/5"><span className="bg-emerald-400" style={{ width: (wins.length / performanceTrades.length * 100) + "%" }}/><span className="bg-slate-500" style={{ width: (breakeven.length / performanceTrades.length * 100) + "%" }}/><span className="bg-rose-400" style={{ width: (losses.length / performanceTrades.length * 100) + "%" }}/></div><div className="mt-5 space-y-3">{[['Wins', wins.length, 'bg-emerald-400'], ['Break even', breakeven.length, 'bg-slate-500'], ['Losses', losses.length, 'bg-rose-400']].map(([label, count, color]) => <div key={String(label)} className="flex items-center gap-2 text-xs"><span className={`h-2 w-2 rounded-full ${color}`}/><span className="flex-1 text-slate-400">{label}</span><span className="tabular-nums text-white">{count}</span></div>)}</div><div className="mt-5 grid grid-cols-2 gap-2 border-t border-white/[.06] pt-4">{[['Average win', averageWin], ['Average loss', averageLoss], ['Best trade', bestTrade?.pnlValue ?? null], ['Worst trade', worstTrade?.pnlValue ?? null]].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-white/[.025] p-2.5"><p className="text-[10px] text-slate-500">{label}</p><p className={`mt-1 text-xs font-semibold tabular-nums ${typeof value !== 'number' ? 'text-slate-500' : value >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{typeof value === 'number' ? money(value, currency) : '—'}</p></div>)}</div></> : <p className="py-12 text-center text-sm text-slate-500">No trade outcomes for this selection.</p>}</section>

@@ -27,7 +27,7 @@ import { NovaOrbDock } from './components/NovaOrbDock';
 import { NetWorthScreen } from './components/NetWorthScreen';
 import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
 import { ApiClient } from './services/apiClient.ts';
-import { mapMyfxbookAccountToDashboard, mapMyfxbookActivityToTrades, resolveActiveAccount, tradesForAccount, MyfxbookAccountsResponse, MyfxbookRequestError } from './services/myfxbookAccounts';
+import { beginMyfxbookActivityRequest, mapMyfxbookAccountToDashboard, mapMyfxbookActivityToTrades, MyfxbookActivityCache, MYFXBOOK_HISTORY_LIMIT, resolveActiveAccount, settleMyfxbookActivityRequest, tradesForAccount, MyfxbookAccountsResponse, MyfxbookRequestError } from './services/myfxbookAccounts';
 
 const NAV_ITEMS: Array<{
   id: NavSection;
@@ -158,7 +158,7 @@ export default function App() {
   // Load from localStorage or defaults
   const [accounts, setAccounts] = useState<PropAccount[]>([]);
   const [myfxbook, setMyfxbook] = useState<{ data: MyfxbookAccountsResponse | null; loading: boolean; error: MyfxbookRequestError | null }>({ data: null, loading: false, error: null });
-  const [myfxbookActivity, setMyfxbookActivity] = useState<Record<string, { trades: TradeExecution[]; loading: boolean; error: MyfxbookRequestError | null }>>({});
+  const [myfxbookActivity, setMyfxbookActivity] = useState<MyfxbookActivityCache>({});
 
   const [activeAccountId, setActiveAccountId] = useState<string>('');
   const [isConnectAccountOpen, setIsConnectAccountOpen] = useState(false);
@@ -195,24 +195,35 @@ export default function App() {
   const allDashboardTrades = [...trades, ...Object.values(myfxbookActivity).flatMap((entry) => entry.trades)];
   const activeTrades = tradesForAccount(allDashboardTrades, activeAccount?.id);
   const selectedMyfxbookActivity = activeAccount?.source === 'MYFXBOOK' ? myfxbookActivity[activeAccount.id] : undefined;
-  const selectAccount = (id: string) => { setActiveAccountId(id); setSelectedTrade(null); };
+  const selectedMyfxbookLoading = activeAccount?.source === 'MYFXBOOK' && (!selectedMyfxbookActivity || selectedMyfxbookActivity.loading);
+  const selectedAccountIdRef = useRef(activeAccount?.id);
+  selectedAccountIdRef.current = activeAccount?.id;
+  const myfxbookRequestIds = useRef(new Map<string, number>());
+  const loadMyfxbookActivity = (account: PropAccount): Promise<boolean> => {
+    const providerAccountId = account.providerAccountId;
+    if (account.source !== 'MYFXBOOK' || !providerAccountId || !authToken || selectedAccountIdRef.current !== account.id) return Promise.resolve(false);
+    const requestId = (myfxbookRequestIds.current.get(account.id) || 0) + 1;
+    myfxbookRequestIds.current.set(account.id, requestId);
+    setMyfxbookActivity((current) => beginMyfxbookActivityRequest(current, account.id, requestId));
+    return ApiClient.getMyfxbookActivity(providerAccountId).then((activity) => {
+      if (activity.accountId !== providerAccountId) throw new MyfxbookRequestError('Myfxbook returned history for a different account.');
+      const mappedTrades = mapMyfxbookActivityToTrades(account, activity);
+      if (selectedAccountIdRef.current !== account.id || myfxbookRequestIds.current.get(account.id) !== requestId) return false;
+      setMyfxbookActivity((current) => settleMyfxbookActivityRequest(current, account.id, requestId, selectedAccountIdRef.current, { trades: mappedTrades }));
+      return true;
+    }).catch((error) => {
+      const safeError = error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook history is unavailable.');
+      if (selectedAccountIdRef.current === account.id && myfxbookRequestIds.current.get(account.id) === requestId) {
+        setMyfxbookActivity((current) => settleMyfxbookActivityRequest(current, account.id, requestId, selectedAccountIdRef.current, { error: safeError }));
+      }
+      return false;
+    });
+  };
+  const selectAccount = (id: string) => { selectedAccountIdRef.current = id; setActiveAccountId(id); setSelectedTrade(null); };
   useEffect(() => {
     if (!activeAccount || activeAccount.source !== 'MYFXBOOK' || !activeAccount.providerAccountId || !authToken) return;
-    let stopped = false;
-    const account = activeAccount;
-    const providerAccountId = account.providerAccountId;
-    if (!providerAccountId) return;
-    setMyfxbookActivity((current) => ({ ...current, [account.id]: { trades: [], loading: true, error: null } }));
-    ApiClient.getMyfxbookActivity(providerAccountId).then((activity) => {
-      if (stopped) return;
-      const mappedTrades = mapMyfxbookActivityToTrades(account, activity);
-      setMyfxbookActivity((current) => ({ ...current, [account.id]: { trades: mappedTrades, loading: false, error: null } }));
-    }).catch((error) => {
-      if (stopped) return;
-      setMyfxbookActivity((current) => ({ ...current, [account.id]: { trades: current[account.id]?.trades || [], loading: false, error: error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook history is unavailable.') } }));
-    });
-    return () => { stopped = true; };
-  }, [activeAccountId, authToken, myfxbook.data]);
+    void loadMyfxbookActivity(activeAccount);
+  }, [activeAccount?.id, activeAccount?.providerAccountId, authToken]);
   useEffect(() => {
     if (!selectableAccounts.some((account) => account.id === activeAccountId) && selectableAccounts.length) setActiveAccountId(selectableAccounts[0].id);
   }, [activeAccountId, accounts, myfxbook.data]);
@@ -258,6 +269,7 @@ export default function App() {
 
   useEffect(() => {
     const clearSession = () => {
+      selectedAccountIdRef.current = undefined;
       sessionStorage.removeItem('nova_session');
       setAuthToken('');
       setAccounts([]);
@@ -418,6 +430,7 @@ export default function App() {
   };
 
   const handleSignOut = () => {
+    selectedAccountIdRef.current = undefined;
     setActiveNav('ai');
     sessionStorage.removeItem('nova_session');
     setAuthToken('');
@@ -612,13 +625,17 @@ export default function App() {
   const handleSyncFromHeader = async (requestedAccountId?: string) => {
     const myfxAccount = selectableAccounts.find((account) => account.id === requestedAccountId && account.source === 'MYFXBOOK');
     if (myfxAccount?.providerAccountId) {
+      if (selectedAccountIdRef.current !== myfxAccount.id) {
+        selectAccount(myfxAccount.id);
+        return;
+      }
       setIsSyncing(true);
       try {
-        const activity = await ApiClient.getMyfxbookActivity(myfxAccount.providerAccountId);
-        setMyfxbookActivity((current) => ({ ...current, [myfxAccount.id]: { trades: mapMyfxbookActivityToTrades(myfxAccount, activity), loading: false, error: null } }));
+        const refreshed = await loadMyfxbookActivity(myfxAccount);
+        if (selectedAccountIdRef.current !== myfxAccount.id) return;
+        if (!refreshed) throw new MyfxbookRequestError('Myfxbook history could not be refreshed.');
         setSyncToast({ success: true, message: `${myfxAccount.name} history refreshed from Myfxbook.` });
       } catch (error) {
-        setMyfxbookActivity((current) => ({ ...current, [myfxAccount.id]: { trades: current[myfxAccount.id]?.trades || [], loading: false, error: error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook history is unavailable.') } }));
         setSyncToast({ success: false, message: 'Myfxbook history could not be refreshed.' });
       } finally { setIsSyncing(false); setTimeout(() => setSyncToast(null), 5000); }
       return;
@@ -1124,8 +1141,10 @@ export default function App() {
               onNavigateToSettings={() => setActiveNav('settings')}
               onSelectAccount={selectAccount}
               onOpenAccountDetails={(id) => { selectAccount(id); setActiveNav('accounts'); setIsConnectAccountOpen(false); setAccountDetailsId(id); }}
-              activityLoading={selectedMyfxbookActivity?.loading}
+              activityLoading={selectedMyfxbookLoading}
+              activityLoaded={selectedMyfxbookActivity?.loaded}
               activityError={selectedMyfxbookActivity?.error?.message}
+              activityHistoryLimit={activeAccount.source === 'MYFXBOOK' ? MYFXBOOK_HISTORY_LIMIT : undefined}
             />
           )}
 
@@ -1145,14 +1164,15 @@ export default function App() {
                 setIsImportModalOpen(true);
               }}
               currency={activeAccount.currency}
-              activityLoading={selectedMyfxbookActivity?.loading}
+              activityLoading={selectedMyfxbookLoading}
               activityError={selectedMyfxbookActivity?.error?.message}
+              activityHistoryLimit={activeAccount.source === 'MYFXBOOK' ? MYFXBOOK_HISTORY_LIMIT : undefined}
             />
           )}
 
           {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} nova={nova} livekit={livekitVoice} />}
           {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
-          {activeNav === 'analytics' && <AnalyticsScreen trades={activeTrades} currency={activeAccount.currency} />}
+          {activeNav === 'analytics' && <AnalyticsScreen trades={activeTrades} currency={activeAccount.currency} activityLoading={selectedMyfxbookLoading} activityError={selectedMyfxbookActivity?.error?.message} activityHistoryLimit={activeAccount.source === 'MYFXBOOK' ? MYFXBOOK_HISTORY_LIMIT : undefined} />}
 
           {activeNav === 'accounts' && (
             isConnectAccountOpen ? (

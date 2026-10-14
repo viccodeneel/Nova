@@ -39,6 +39,17 @@ export interface MyfxbookAccountActivity {
   openTrades: MyfxbookOpenTrade[]; history: MyfxbookHistoryTrade[];
 }
 
+export interface MyfxbookActivityCacheEntry {
+  trades: TradeExecution[];
+  loading: boolean;
+  error: MyfxbookRequestError | null;
+  loaded: boolean;
+  requestId: number;
+}
+
+export type MyfxbookActivityCache = Record<string, MyfxbookActivityCacheEntry>;
+export const MYFXBOOK_HISTORY_LIMIT = 50;
+
 export type MyfxbookLoadState = 'loading' | 'authentication-error' | 'provider-error' | 'empty' | 'ready';
 
 export class MyfxbookRequestError extends Error {
@@ -119,7 +130,12 @@ function stableTradeHash(value: string): string {
 
 function tradeSide(value: string | undefined): TradeExecution['side'] {
   const normalized = value?.toLowerCase();
-  return normalized === 'buy' ? 'BUY' : normalized === 'sell' ? 'SELL' : 'UNKNOWN';
+  return normalized?.startsWith('buy') ? 'BUY' : normalized?.startsWith('sell') ? 'SELL' : 'UNKNOWN';
+}
+
+export function myfxbookRealizedTradePnl(record: MyfxbookHistoryTrade): number | undefined {
+  if (record.profit === undefined) return undefined;
+  return record.profit + (record.commission ?? 0) + (record.interest ?? 0) + (record.swap ?? 0);
 }
 
 function mapProviderTrade(
@@ -131,10 +147,14 @@ function mapProviderTrade(
 ): TradeExecution {
   const history = type === 'history' ? record as MyfxbookHistoryTrade : undefined;
   const open = type === 'open' ? record as MyfxbookOpenTrade : undefined;
-  const pnl = history?.profit ?? open?.floatingProfit;
-  const pnlAvailable = pnl !== undefined;
-  const outcome: TradeExecution['outcome'] = type === 'open' ? 'OPEN' : !pnlAvailable ? 'UNKNOWN' : pnl! > 0 ? 'WIN' : pnl! < 0 ? 'LOSS' : 'BE';
   const direction = record.direction;
+  const side = tradeSide(direction);
+  const isTradingRecord = Boolean(record.symbol) && side !== 'UNKNOWN';
+  const pnl = isTradingRecord
+    ? history ? myfxbookRealizedTradePnl(history) : open?.floatingProfit === undefined ? undefined : open.floatingProfit + (open.swap ?? 0)
+    : undefined;
+  const pnlAvailable = pnl !== undefined;
+  const outcome: TradeExecution['outcome'] = type === 'open' ? 'OPEN' : !pnlAvailable ? 'UNKNOWN' : pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BE';
   const identity = JSON.stringify([type, record.openTime, history?.closeTime, record.symbol, direction, record.size, record.entryPrice, history?.exitPrice, pnl, record.stopLoss, record.takeProfit, history?.commission, history?.interest, record.swap, occurrence]);
   const fees = history && [history.commission, history.interest, history.swap].some((value) => value !== undefined)
     ? `Commission ${history.commission ?? '—'} · Interest ${history.interest ?? '—'} · Swap ${history.swap ?? '—'}`
@@ -147,7 +167,7 @@ function mapProviderTrade(
     stopLoss: record.stopLoss === undefined ? undefined : String(record.stopLoss),
     takeProfit: record.takeProfit === undefined ? undefined : String(record.takeProfit),
     time: history?.closeTime || record.openTime || 'Time unavailable',
-    instrument: record.symbol || 'Symbol unavailable', side: tradeSide(direction),
+    instrument: record.symbol || 'Symbol unavailable', side,
     entry: record.entryPrice === undefined ? '' : String(record.entryPrice),
     exit: history?.exitPrice === undefined ? undefined : String(history.exitPrice),
     lots: record.size === undefined ? undefined : String(record.size), outcome,
@@ -188,4 +208,36 @@ export function resolveActiveAccount(accounts: PropAccount[], selectedId?: strin
 
 export function tradesForAccount(trades: TradeExecution[], accountId?: string): TradeExecution[] {
   return accountId ? trades.filter((trade) => trade.accountId === accountId) : [];
+}
+
+export function beginMyfxbookActivityRequest(
+  cache: MyfxbookActivityCache,
+  accountId: string,
+  requestId: number,
+): MyfxbookActivityCache {
+  const existing = cache[accountId];
+  return {
+    ...cache,
+    [accountId]: {
+      trades: existing?.trades ?? [], loading: true, error: null,
+      loaded: existing?.loaded ?? false, requestId,
+    },
+  };
+}
+
+export function settleMyfxbookActivityRequest(
+  cache: MyfxbookActivityCache,
+  accountId: string,
+  requestId: number,
+  selectedAccountId: string | undefined,
+  result: { trades: TradeExecution[] } | { error: MyfxbookRequestError },
+): MyfxbookActivityCache {
+  const existing = cache[accountId];
+  if (!existing || existing.requestId !== requestId || selectedAccountId !== accountId) return cache;
+  return {
+    ...cache,
+    [accountId]: 'trades' in result
+      ? { trades: result.trades, loading: false, error: null, loaded: true, requestId }
+      : { ...existing, trades: existing.trades, loading: false, error: result.error, requestId },
+  };
 }

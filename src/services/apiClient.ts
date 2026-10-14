@@ -140,7 +140,10 @@ export class ApiClient {
     ]);
     const history = historyEnvelope?.data;
     const open = openEnvelope?.data;
-    if (historyEnvelope?.success !== true || openEnvelope?.success !== true || !Array.isArray(history?.trades) || !Array.isArray(open?.trades)) {
+    if (historyEnvelope?.success !== true || openEnvelope?.success !== true
+      || history?.provider !== 'Myfxbook' || open?.provider !== 'Myfxbook'
+      || String(history?.accountId) !== accountId || String(open?.accountId) !== accountId
+      || typeof history?.fetchedAt !== 'string' || !Array.isArray(history?.trades) || !Array.isArray(open?.trades)) {
       throw new MyfxbookRequestError('Myfxbook returned unreadable trade history.');
     }
     return {

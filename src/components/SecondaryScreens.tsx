@@ -9,7 +9,7 @@ import {
 import { AccountSettingsModal } from './AccountSettingsModal';
 
 /* ================= ANALYTICS SCREEN ================= */
-export const AnalyticsScreen: React.FC<{ trades: TradeExecution[]; currency?: string; activityLoading?: boolean; activityError?: string | null }> = ({ trades, currency, activityLoading, activityError }) => {
+export const AnalyticsScreen: React.FC<{ trades: TradeExecution[]; currency?: string; activityLoading?: boolean; activityError?: string | null; activityHistoryLimit?: number }> = ({ trades, currency, activityLoading, activityError, activityHistoryLimit }) => {
   const [sessionFilter, setSessionFilter] = useState<'ALL' | 'OVERLAP' | 'LONDON' | 'NY'>('ALL');
 
   const filteredTrades = trades.filter((trade) => {
@@ -64,7 +64,7 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[]; currency?: st
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-headline-sm text-base font-semibold text-white">Performance summary</h2>
-              <p className="mt-1 text-xs text-slate-400">Headline results use the recorded trades matching this session filter.</p>
+              <p className="mt-1 text-xs text-slate-400">Headline results use the recorded trades matching this session filter.{activityHistoryLimit ? ` Myfxbook provides only the latest ${activityHistoryLimit} history transactions.` : ''}</p>
             </div>
             <div className="flex max-w-full flex-wrap items-center rounded-xl border border-white/[0.08] bg-black/40 p-1">
               {(['ALL', 'OVERLAP', 'LONDON', 'NY'] as const).map((s) => (
