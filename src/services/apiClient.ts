@@ -1,4 +1,5 @@
 import { PropAccount, TradeExecution, NavSection } from '../data/terminalData';
+import { MyfxbookAccountsResponse, MyfxbookRequestError, parseMyfxbookAccountsResponse } from './myfxbookAccounts';
 
 export interface ApiSyncResult {
   success: boolean;
@@ -96,6 +97,30 @@ export class ApiClient {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) throw new Error('Could not read LiveKit voice status.');
     return data.data as LiveKitVoiceStatus;
+  }
+
+  public static async getMyfxbookAccounts(): Promise<MyfxbookAccountsResponse> {
+    let response: Response;
+    try {
+      response = await this.request(`${this.baseUrl}/myfxbook/accounts`, { signal: AbortSignal.timeout(20000) });
+    } catch {
+      throw new MyfxbookRequestError('Could not reach the Myfxbook service.');
+    }
+    if (!response.ok) {
+      const status = response.status;
+      throw new MyfxbookRequestError(
+        status === 401
+          ? 'Your NOVA session has expired. Sign in again to load Myfxbook accounts.'
+          : status === 503
+            ? 'Myfxbook is not configured or is temporarily unavailable.'
+            : status === 502 || status === 504
+              ? 'Myfxbook could not provide account data right now.'
+              : 'NOVA could not load Myfxbook accounts.',
+        status,
+      );
+    }
+    const payload: unknown = await response.json().catch(() => null);
+    return parseMyfxbookAccountsResponse(payload);
   }
 
   public static async getLiveKitVoiceToken(accountId?: string): Promise<LiveKitVoiceCredentials> {

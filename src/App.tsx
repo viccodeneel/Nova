@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import {
   calculateAccountMetricsFromTrades,
@@ -27,6 +27,8 @@ import { NovaOrbDock } from './components/NovaOrbDock';
 import { NetWorthScreen } from './components/NetWorthScreen';
 import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
 import { ApiClient } from './services/apiClient.ts';
+import { MyfxbookAccountsPanel } from './components/MyfxbookAccountsPanel';
+import { MyfxbookAccountsResponse, MyfxbookRequestError } from './services/myfxbookAccounts';
 
 const NAV_ITEMS: Array<{
   id: NavSection;
@@ -150,10 +152,13 @@ export default function App() {
   const [authToken, setAuthToken] = useState(() =>
     import.meta.env.DEV ? 'local-development' : sessionStorage.getItem('nova_session') || ''
   );
+  const authTokenRef = useRef(authToken);
+  authTokenRef.current = authToken;
   const [activeNav, setActiveNav] = useState<NavSection>('overview');
 
   // Load from localStorage or defaults
   const [accounts, setAccounts] = useState<PropAccount[]>([]);
+  const [myfxbook, setMyfxbook] = useState<{ data: MyfxbookAccountsResponse | null; loading: boolean; error: MyfxbookRequestError | null }>({ data: null, loading: false, error: null });
 
   const [activeAccountId, setActiveAccountId] = useState<string>('');
   const [isConnectAccountOpen, setIsConnectAccountOpen] = useState(false);
@@ -184,6 +189,37 @@ export default function App() {
     if (!authToken) return;
     ApiClient.getProfile().then(setProfile).catch(() => undefined);
   }, [authToken]);
+  const refreshMyfxbook = async () => {
+    const requestToken = authTokenRef.current;
+    if (!requestToken) return;
+    setMyfxbook((current) => ({ ...current, loading: true, error: null }));
+    try {
+      const data = await ApiClient.getMyfxbookAccounts();
+      if (authTokenRef.current !== requestToken) return;
+      setMyfxbook({ data, loading: false, error: null });
+    } catch (error) {
+      if (authTokenRef.current !== requestToken) return;
+      setMyfxbook((current) => ({ ...current, loading: false, error: error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook could not provide account data.') }));
+    }
+  };
+  useEffect(() => {
+    if (!authToken) {
+      setMyfxbook({ data: null, loading: false, error: null });
+      return;
+    }
+    let stopped = false;
+    const load = async () => {
+      setMyfxbook((current) => ({ ...current, loading: true, error: null }));
+      try {
+        const data = await ApiClient.getMyfxbookAccounts();
+        if (!stopped) setMyfxbook({ data, loading: false, error: null });
+      } catch (error) {
+        if (!stopped) setMyfxbook((current) => ({ ...current, loading: false, error: error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook could not provide account data.') }));
+      }
+    };
+    void load();
+    return () => { stopped = true; };
+  }, [authToken]);
   const handleGoalChange = async (goal: number | null) => setProfile(await ApiClient.updateProfile({ networth_goal: goal }));
   // One NOVA engine for the whole app: conversations survive tab changes and the wake word works anywhere.
   const nova = useNovaVoice({ enabled: Boolean(authToken), onNavigate: setActiveNav, getAccountId: () => activeAccountId, getActiveTab: () => activeNav });
@@ -213,6 +249,7 @@ export default function App() {
       setAccounts([]);
       setActiveAccountId('');
       setTrades([]);
+      setMyfxbook({ data: null, loading: false, error: null });
     };
     window.addEventListener('nova:auth-expired', clearSession);
     return () => window.removeEventListener('nova:auth-expired', clearSession);
@@ -374,6 +411,7 @@ export default function App() {
     setAccounts([]);
     setActiveAccountId('');
     setTrades([]);
+    setMyfxbook({ data: null, loading: false, error: null });
   };
 
   const handleLocalAccountConnected = async () => {
@@ -672,8 +710,8 @@ export default function App() {
           </header>
           <main className="min-h-screen px-4 pb-28 pt-[94px] sm:px-6 xl:px-5">
             <div key={activeNav} className="nova-enter">
-              {activeNav === 'overview' && <div className="overview-shell"><section className="empty-dashboard-hero"><div><p className="overview-eyebrow"><span className="status-dot"/>NOVA · READY WHEN YOU ARE</p><p className="overview-value-label">Your dashboard is ready</p><h2 className="overview-value">A clearer view<br/>starts here.</h2><p className="overview-hero-sub">Connect a supported account to see your actual balance, equity, and trading performance.</p><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="empty-connect-button"><span className="material-symbols-outlined">add</span>Connect an account</button></div><div className="empty-dashboard-note"><span className="material-symbols-outlined">shield</span><strong>Real data only</strong><p>NOVA won’t show sample balances or invented trade history.</p></div></section><div className="overview-top-grid"><section className="overview-panel account-overview-panel"><div className="overview-panel-head"><div><h3>No accounts connected</h3><p>Once linked, your account summaries will appear here.</p></div></div><div className="overview-empty"><span className="material-symbols-outlined">account_balance</span><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}>Connect your first account <ChevronRight size={14}/></button></div></section><section className="overview-panel quick-actions-panel"><div className="overview-panel-head"><div><h3>Quick actions</h3><p>Explore your workspace</p></div></div><div className="overview-action-list"><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}><span className="action-icon violet"><span className="material-symbols-outlined">add</span></span><span><strong>Connect account</strong><small>Link a supported trading account</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('trade-journal')}><span className="action-icon blue"><span className="material-symbols-outlined">book</span></span><span><strong>Open journal</strong><small>Review recorded trades</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('analytics')}><span className="action-icon cyan"><span className="material-symbols-outlined">analytics</span></span><span><strong>Analyze performance</strong><small>Explore your trading analytics</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('finance')}><span className="action-icon green"><span className="material-symbols-outlined">account_balance_wallet</span></span><span><strong>View net worth</strong><small>Open your wealth tracker</small></span><ChevronRight size={15}/></button></div></section></div></div>}
-              {activeNav === 'accounts' && (isConnectAccountOpen ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} /> : <section className="overview-panel p-6"><h2 className="text-lg font-semibold text-white">No accounts connected</h2><button type="button" onClick={() => setIsConnectAccountOpen(true)} className="mt-3 text-sm text-violet-300">Connect account</button></section>)}
+              {activeNav === 'overview' && <div className="overview-shell"><section className="empty-dashboard-hero"><div><p className="overview-eyebrow"><span className="status-dot"/>NOVA · READY WHEN YOU ARE</p><p className="overview-value-label">Your dashboard is ready</p><h2 className="overview-value">A clearer view<br/>starts here.</h2><p className="overview-hero-sub">Connect a supported account to see your actual balance, equity, and trading performance.</p><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="empty-connect-button"><span className="material-symbols-outlined">add</span>Connect an account</button></div><div className="empty-dashboard-note"><span className="material-symbols-outlined">shield</span><strong>Real data only</strong><p>NOVA won’t show sample balances or invented trade history.</p></div></section><div className="overview-top-grid"><section className="overview-panel account-overview-panel"><div className="overview-panel-head"><div><h3>No accounts connected</h3><p>Once linked, your account summaries will appear here.</p></div></div><div className="overview-empty"><span className="material-symbols-outlined">account_balance</span><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}>Connect your first account <ChevronRight size={14}/></button></div></section><section className="overview-panel quick-actions-panel"><div className="overview-panel-head"><div><h3>Quick actions</h3><p>Explore your workspace</p></div></div><div className="overview-action-list"><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}><span className="action-icon violet"><span className="material-symbols-outlined">add</span></span><span><strong>Connect account</strong><small>Link a supported trading account</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('trade-journal')}><span className="action-icon blue"><span className="material-symbols-outlined">book</span></span><span><strong>Open journal</strong><small>Review recorded trades</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('analytics')}><span className="action-icon cyan"><span className="material-symbols-outlined">analytics</span></span><span><strong>Analyze performance</strong><small>Explore your trading analytics</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('finance')}><span className="action-icon green"><span className="material-symbols-outlined">account_balance_wallet</span></span><span><strong>View net worth</strong><small>Open your wealth tracker</small></span><ChevronRight size={15}/></button></div></section></div><MyfxbookAccountsPanel {...myfxbook} onRefresh={refreshMyfxbook}/></div>}
+              {activeNav === 'accounts' && (isConnectAccountOpen ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} /> : <div className="overview-shell"><section className="overview-panel p-6"><h2 className="text-lg font-semibold text-white">No MT5 accounts connected</h2><button type="button" onClick={() => setIsConnectAccountOpen(true)} className="mt-3 text-sm text-violet-300">Connect account</button></section><MyfxbookAccountsPanel {...myfxbook} onRefresh={refreshMyfxbook}/></div>)}
               {activeNav === 'trade-journal' && <TradeJournalScreen trades={trades} selectedTrade={selectedTrade} accounts={accounts} activeAccountId="" onSelectAccount={() => undefined} onSelectTrade={setSelectedTrade} onAddTrade={handleAddTrade} onDeleteTrade={handleDeleteTrade} />}
               {activeNav === 'ai' && <AiScreen mt5="NONE" name={profile.display_name} nova={nova} livekit={livekitVoice} />}
               {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
@@ -1059,6 +1097,8 @@ export default function App() {
               onNavigateToSettings={() => setActiveNav('settings')}
               onSelectAccount={(id) => setActiveAccountId(id)}
               onOpenAccountDetails={(id) => { setActiveNav('accounts'); setIsConnectAccountOpen(false); setAccountDetailsId(id); }}
+              myfxbook={myfxbook}
+              onRefreshMyfxbook={refreshMyfxbook}
             />
           )}
 
@@ -1111,6 +1151,8 @@ export default function App() {
                 if (accId) setActiveAccountId(accId);
                 setActiveNav('trade-journal');
               }}
+              myfxbook={myfxbook}
+              onRefreshMyfxbook={refreshMyfxbook}
             />
           )}
 

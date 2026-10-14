@@ -7,6 +7,8 @@ import {
   TradeExecution,
 } from '../data/terminalData';
 import { AccountSettingsModal } from './AccountSettingsModal';
+import { MyfxbookAccountsResponse, MyfxbookRequestError } from '../services/myfxbookAccounts';
+import { MyfxbookAccountsPanel } from './MyfxbookAccountsPanel';
 
 /* ================= ANALYTICS SCREEN ================= */
 export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades }) => {
@@ -226,6 +228,8 @@ export const AccountsScreen: React.FC<{
   onSyncPastTrades: (id: string, count?: number) => Promise<void> | void;
   onOpenImportModal?: (account: PropAccount) => void;
   onNavigateToJournal?: (accountId?: string) => void;
+  myfxbook: { data: MyfxbookAccountsResponse | null; loading: boolean; error: MyfxbookRequestError | null };
+  onRefreshMyfxbook: () => void;
 }> = ({
   accounts,
   activeAccountId,
@@ -241,6 +245,8 @@ export const AccountsScreen: React.FC<{
   onSyncPastTrades,
   onOpenImportModal,
   onNavigateToJournal,
+  myfxbook,
+  onRefreshMyfxbook,
 }) => {
   const [accountToDelete, setAccountToDelete] = useState<PropAccount | null>(null);
   const [inspectingAccount, setInspectingAccount] = useState<PropAccount | null>(null);
@@ -354,6 +360,8 @@ export const AccountsScreen: React.FC<{
           </div>
         </div>
       </section>
+
+      <MyfxbookAccountsPanel {...myfxbook} onRefresh={onRefreshMyfxbook}/>
 
       {/* Account Cards Grid or Empty State */}
       {accounts.length === 0 ? (

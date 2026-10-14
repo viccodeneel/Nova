@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, ArrowUpRightFromSquare, BarChart3, BookOpen, ChevronRight, CircleDollarSign, Clock3, Plus, RefreshCw, ShieldCheck, TrendingUp, WalletCards } from 'lucide-react';
 import { PropAccount, TradeExecution } from '../data/terminalData';
+import { MyfxbookAccountsResponse, MyfxbookRequestError } from '../services/myfxbookAccounts';
+import { MyfxbookAccountsPanel } from './MyfxbookAccountsPanel';
 
 interface OverviewScreenProps {
   activeAccount: PropAccount;
@@ -15,6 +17,8 @@ interface OverviewScreenProps {
   onNavigateToSettings: () => void;
   onSelectAccount: (accountId: string) => void;
   onOpenAccountDetails: (accountId: string) => void;
+  myfxbook: { data: MyfxbookAccountsResponse | null; loading: boolean; error: MyfxbookRequestError | null };
+  onRefreshMyfxbook: () => void;
 }
 
 type Range = '7d' | '30d' | 'all';
@@ -57,7 +61,7 @@ const MiniLine: React.FC<{ trades: TradeExecution[]; color?: string }> = ({ trad
   return <svg viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true" className="h-8 w-full"><polyline points={points} fill="none" stroke={color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 };
 
-export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, accounts, trades, onSync, onOpenImportModal, onNavigateToJournal, onNavigateToAccounts, onNavigateToAnalytics, onNavigateToFinance, onNavigateToSettings, onSelectAccount, onOpenAccountDetails }) => {
+export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, accounts, trades, onSync, onOpenImportModal, onNavigateToJournal, onNavigateToAccounts, onNavigateToAnalytics, onNavigateToFinance, onNavigateToSettings, onSelectAccount, onOpenAccountDetails, myfxbook, onRefreshMyfxbook }) => {
   const [range, setRange] = useState<Range>('all');
   const accountTrades = trades.filter((trade) => trade.accountId === activeAccount.id);
   const closedTrades = accountTrades.filter((trade) => trade.outcome === 'WIN' || trade.outcome === 'LOSS' || trade.outcome === 'BE');
@@ -143,6 +147,8 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({ activeAccount, a
         </article>;
       }) : <div className="overview-panel empty-account-card"><p>Connect a supported account to see live account details here.</p><button type="button" onClick={onNavigateToAccounts}>Go to accounts <ChevronRight size={14}/></button></div>}
     </section>
+
+    <MyfxbookAccountsPanel {...myfxbook} onRefresh={onRefreshMyfxbook}/>
 
     <div className="overview-bottom-grid">
       <section className="overview-panel performance-panel">
