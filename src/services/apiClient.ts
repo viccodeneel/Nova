@@ -1,5 +1,5 @@
 import { PropAccount, TradeExecution, NavSection } from '../data/terminalData';
-import { MyfxbookAccountsResponse, MyfxbookRequestError, parseMyfxbookAccountsResponse } from './myfxbookAccounts';
+import { MyfxbookAccountActivity, MyfxbookAccountsResponse, MyfxbookRequestError, parseMyfxbookAccountsResponse } from './myfxbookAccounts';
 
 export interface ApiSyncResult {
   success: boolean;
@@ -121,6 +121,33 @@ export class ApiClient {
     }
     const payload: unknown = await response.json().catch(() => null);
     return parseMyfxbookAccountsResponse(payload);
+  }
+
+  public static async getMyfxbookActivity(accountId: string): Promise<MyfxbookAccountActivity> {
+    const safeId = encodeURIComponent(accountId);
+    const [historyResponse, openResponse] = await Promise.all([
+      this.request(`${this.baseUrl}/myfxbook/accounts/${safeId}/history`, { signal: AbortSignal.timeout(20000) }),
+      this.request(`${this.baseUrl}/myfxbook/accounts/${safeId}/open-trades`, { signal: AbortSignal.timeout(20000) }),
+    ]);
+    if (!historyResponse.ok || !openResponse.ok) {
+      const status = historyResponse.status === 401 || openResponse.status === 401 ? 401
+        : historyResponse.status === 404 || openResponse.status === 404 ? 404
+          : !historyResponse.ok ? historyResponse.status : openResponse.status;
+      throw new MyfxbookRequestError(status === 401 ? 'Your NOVA session has expired. Sign in again.' : 'Myfxbook trade history is unavailable right now.', status);
+    }
+    const [historyEnvelope, openEnvelope] = await Promise.all([
+      historyResponse.json().catch(() => null), openResponse.json().catch(() => null),
+    ]);
+    const history = historyEnvelope?.data;
+    const open = openEnvelope?.data;
+    if (historyEnvelope?.success !== true || openEnvelope?.success !== true || !Array.isArray(history?.trades) || !Array.isArray(open?.trades)) {
+      throw new MyfxbookRequestError('Myfxbook returned unreadable trade history.');
+    }
+    return {
+      provider: 'Myfxbook', accountId, fetchedAt: history.fetchedAt,
+      timestampSemantics: history.timestampSemantics,
+      history: history.trades, openTrades: open.trades,
+    } as MyfxbookAccountActivity;
   }
 
   public static async getLiveKitVoiceToken(accountId?: string): Promise<LiveKitVoiceCredentials> {

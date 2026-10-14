@@ -10,13 +10,22 @@ export type NavSection =
 export interface TradeExecution {
   id: string;
   accountId?: string;
+  source?: 'MT5' | 'MANUAL' | 'MYFXBOOK';
+  tradeStatus?: 'OPEN' | 'CLOSED';
+  pnlAvailable?: boolean;
+  rValueAvailable?: boolean;
+  sourceTimestampSemantics?: string;
+  openedAt?: string;
+  closedAt?: string;
+  stopLoss?: string;
+  takeProfit?: string;
   time: string;
   instrument: string;
-  side: 'BUY' | 'SELL';
+  side: 'BUY' | 'SELL' | 'UNKNOWN';
   entry: string;
   exit?: string;
   lots?: string;
-  outcome: 'WIN' | 'LOSS' | 'BE';
+  outcome: 'WIN' | 'LOSS' | 'BE' | 'OPEN' | 'UNKNOWN';
   rMultiple: string;
   rValue: number;
   netPnl: string;
@@ -50,6 +59,10 @@ export interface Mt5BridgeConfig {
 
 export interface PropAccount {
   id: string;
+  source?: 'NOVA' | 'MYFXBOOK';
+  providerAccountId?: string;
+  balanceAvailable?: boolean;
+  equityAvailable?: boolean;
   name: string;
   currency?: string;
   startingBalanceAvailable?: boolean;

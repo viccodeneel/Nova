@@ -1,3 +1,5 @@
+import { PropAccount, TradeExecution } from '../data/terminalData';
+
 export interface MyfxbookAccount {
   id: string;
   provider: 'Myfxbook';
@@ -19,6 +21,22 @@ export interface MyfxbookAccountsResponse {
   fetchedAt: string;
   timestampSemantics?: string;
   accounts: MyfxbookAccount[];
+}
+
+export interface MyfxbookOpenTrade {
+  openTime?: string; symbol?: string; direction?: string; size?: number; sizeType?: string;
+  entryPrice?: number; stopLoss?: number; takeProfit?: number; floatingProfit?: number; swap?: number;
+}
+
+export interface MyfxbookHistoryTrade {
+  openTime?: string; closeTime?: string; symbol?: string; direction?: string; size?: number; sizeType?: string;
+  entryPrice?: number; exitPrice?: number; stopLoss?: number; takeProfit?: number; profit?: number;
+  commission?: number; interest?: number; swap?: number;
+}
+
+export interface MyfxbookAccountActivity {
+  provider: 'Myfxbook'; accountId: string; fetchedAt: string; timestampSemantics?: string;
+  openTrades: MyfxbookOpenTrade[]; history: MyfxbookHistoryTrade[];
 }
 
 export type MyfxbookLoadState = 'loading' | 'authentication-error' | 'provider-error' | 'empty' | 'ready';
@@ -74,6 +92,83 @@ export function parseMyfxbookAccountsResponse(value: unknown): MyfxbookAccountsR
   };
 }
 
+export function mapMyfxbookAccountToDashboard(account: MyfxbookAccount): PropAccount {
+  return {
+    id: `myfxbook:${account.id}`, source: 'MYFXBOOK', providerAccountId: account.id,
+    name: account.name || 'Myfxbook account', currency: account.currency,
+    balanceAvailable: account.balance !== undefined, equityAvailable: account.equity !== undefined,
+    startingBalanceAvailable: false, profitAvailable: account.profit !== undefined,
+    provider: 'Myfxbook', accountType: typeof account.demo === 'boolean' ? (account.demo ? 'Demo' : 'Live') : undefined,
+    connectionMode: account.demo === undefined ? null : account.demo ? 'DEMO' : 'REAL',
+    classification: account.demo === undefined ? undefined : account.demo ? 'DEMO' : 'LIVE_BROKERAGE',
+    connectionStatus: 'PROVIDER_READ_ONLY', ref: account.mtAccountNumber || account.id,
+    shortRef: account.mtAccountNumber || 'Myfxbook', bridge: 'Myfxbook', phase: '',
+    baseBalance: 0, currentBalance: account.balance ?? 0, liveEquity: account.equity ?? 0,
+    floatingPnl: 0, netProfit: account.profit ?? 0, roiPercent: 0, targetProfit: 0,
+    targetPercent: 0, passThreshold: 0, dailyLimit: 0, currentDailyDrawdown: 0,
+    maxLossLimit: 0, currentMaxDrawdown: 0, peakWater: account.balance ?? 0,
+    status: 'SAFE', isRealConnected: undefined, tradeCount: undefined,
+  };
+}
+
+function stableTradeHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  return (hash >>> 0).toString(36);
+}
+
+function tradeSide(value: string | undefined): TradeExecution['side'] {
+  const normalized = value?.toLowerCase();
+  return normalized === 'buy' ? 'BUY' : normalized === 'sell' ? 'SELL' : 'UNKNOWN';
+}
+
+function mapProviderTrade(
+  account: PropAccount,
+  record: MyfxbookHistoryTrade | MyfxbookOpenTrade,
+  type: 'history' | 'open',
+  occurrence: number,
+  timestampSemantics?: string,
+): TradeExecution {
+  const history = type === 'history' ? record as MyfxbookHistoryTrade : undefined;
+  const open = type === 'open' ? record as MyfxbookOpenTrade : undefined;
+  const pnl = history?.profit ?? open?.floatingProfit;
+  const pnlAvailable = pnl !== undefined;
+  const outcome: TradeExecution['outcome'] = type === 'open' ? 'OPEN' : !pnlAvailable ? 'UNKNOWN' : pnl! > 0 ? 'WIN' : pnl! < 0 ? 'LOSS' : 'BE';
+  const direction = record.direction;
+  const identity = JSON.stringify([type, record.openTime, history?.closeTime, record.symbol, direction, record.size, record.entryPrice, history?.exitPrice, pnl, record.stopLoss, record.takeProfit, history?.commission, history?.interest, record.swap, occurrence]);
+  const fees = history && [history.commission, history.interest, history.swap].some((value) => value !== undefined)
+    ? `Commission ${history.commission ?? '—'} · Interest ${history.interest ?? '—'} · Swap ${history.swap ?? '—'}`
+    : 'Not reported';
+  return {
+    id: `myfxbook:${account.providerAccountId}:${type}:${stableTradeHash(identity)}`,
+    accountId: account.id, source: 'MYFXBOOK', tradeStatus: type === 'open' ? 'OPEN' : 'CLOSED',
+    pnlAvailable, rValueAvailable: false,
+    openedAt: record.openTime, closedAt: history?.closeTime,
+    stopLoss: record.stopLoss === undefined ? undefined : String(record.stopLoss),
+    takeProfit: record.takeProfit === undefined ? undefined : String(record.takeProfit),
+    time: history?.closeTime || record.openTime || 'Time unavailable',
+    instrument: record.symbol || 'Symbol unavailable', side: tradeSide(direction),
+    entry: record.entryPrice === undefined ? '' : String(record.entryPrice),
+    exit: history?.exitPrice === undefined ? undefined : String(history.exitPrice),
+    lots: record.size === undefined ? undefined : String(record.size), outcome,
+    rMultiple: '—', rValue: 0, netPnl: pnlAvailable ? `${pnl! >= 0 ? '+' : '−'}${Math.abs(pnl!).toFixed(2)}${account.currency ? ` ${account.currency}` : ''}` : 'Unavailable',
+    pnlValue: pnl ?? 0, quality: 'Not recorded', discipline: 'Not recorded', disciplineScore: 0,
+    session: 'Unknown', holdDuration: 'Unknown', fees, notes: '', rulesPassed: 0,
+    ...(timestampSemantics ? { sourceTimestampSemantics: timestampSemantics } : {}),
+  };
+}
+
+export function mapMyfxbookActivityToTrades(account: PropAccount, activity: MyfxbookAccountActivity): TradeExecution[] {
+  const seen = new Map<string, number>();
+  const mapRecords = <T extends MyfxbookHistoryTrade | MyfxbookOpenTrade>(records: T[], type: 'history' | 'open') => records.map((record) => {
+    const signature = JSON.stringify([type, record.openTime, 'closeTime' in record ? record.closeTime : undefined, record.symbol, record.direction, record.size, record.entryPrice, 'exitPrice' in record ? record.exitPrice : undefined, 'profit' in record ? record.profit : 'floatingProfit' in record ? record.floatingProfit : undefined, record.stopLoss, record.takeProfit, 'commission' in record ? record.commission : undefined, 'interest' in record ? record.interest : undefined, record.swap]);
+    const occurrence = seen.get(signature) || 0;
+    seen.set(signature, occurrence + 1);
+    return mapProviderTrade(account, record, type, occurrence, activity.timestampSemantics);
+  });
+  return [...mapRecords(activity.history, 'history'), ...mapRecords(activity.openTrades, 'open')];
+}
+
 export function getMyfxbookLoadState(input: {
   loading: boolean;
   error: MyfxbookRequestError | null;
@@ -84,4 +179,13 @@ export function getMyfxbookLoadState(input: {
   if (input.error && !input.data) return 'provider-error';
   if (!input.data || input.data.accounts.length === 0) return 'empty';
   return 'ready';
+}
+
+
+export function resolveActiveAccount(accounts: PropAccount[], selectedId?: string): PropAccount | undefined {
+  return accounts.find((account) => account.id === selectedId) || accounts[0];
+}
+
+export function tradesForAccount(trades: TradeExecution[], accountId?: string): TradeExecution[] {
+  return accountId ? trades.filter((trade) => trade.accountId === accountId) : [];
 }

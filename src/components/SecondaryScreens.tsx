@@ -7,11 +7,9 @@ import {
   TradeExecution,
 } from '../data/terminalData';
 import { AccountSettingsModal } from './AccountSettingsModal';
-import { MyfxbookAccountsResponse, MyfxbookRequestError } from '../services/myfxbookAccounts';
-import { MyfxbookAccountsPanel } from './MyfxbookAccountsPanel';
 
 /* ================= ANALYTICS SCREEN ================= */
-export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades }) => {
+export const AnalyticsScreen: React.FC<{ trades: TradeExecution[]; currency?: string; activityLoading?: boolean; activityError?: string | null }> = ({ trades, currency, activityLoading, activityError }) => {
   const [sessionFilter, setSessionFilter] = useState<'ALL' | 'OVERLAP' | 'LONDON' | 'NY'>('ALL');
 
   const filteredTrades = trades.filter((trade) => {
@@ -20,40 +18,36 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
     if (sessionFilter === 'NY') return trade.session.includes('NY') && !trade.session.includes('Overlap');
     return true;
   });
-
-  const wins = filteredTrades.filter((t) => t.outcome === 'WIN');
-  const losses = filteredTrades.filter((t) => t.outcome === 'LOSS');
-  const winRate = filteredTrades.length > 0 ? ((wins.length / filteredTrades.length) * 100).toFixed(1) : null;
-
-  const fullDlmTrades = filteredTrades.filter((t) => t.disciplineScore === 100);
-
-  const totalWinR = wins.reduce((acc, t) => acc + t.rValue, 0);
-  const avgWinR = wins.length > 0 ? `+${(totalWinR / wins.length).toFixed(2)}R` : '--';
-  const totalLossR = Math.abs(losses.reduce((acc, t) => acc + t.rValue, 0));
-  const avgLossR = losses.length > 0 ? `-${(totalLossR / losses.length).toFixed(2)}R` : '--';
-
-  const grossProfit = wins.reduce((acc, t) => acc + Math.max(0, t.pnlValue), 0);
-  const grossLoss = Math.abs(losses.reduce((acc, t) => acc + Math.min(0, t.pnlValue), 0));
-  const netProfit = grossProfit - grossLoss;
-
-  const overlapTrades = filteredTrades.filter((t) => t.session.includes('Overlap'));
-  const londonTrades = filteredTrades.filter((t) => t.session.includes('London') && !t.session.includes('Overlap'));
-  const nyTrades = filteredTrades.filter((t) => t.session.includes('NY') && !t.session.includes('Overlap'));
-
-  const getSessionStats = (list: TradeExecution[]) => {
-    const listWins = list.filter((t) => t.outcome === 'WIN').length;
-    const wr = list.length > 0 ? ((listWins / list.length) * 100).toFixed(1) + '%' : '--';
-    const r = list.reduce((acc, t) => acc + t.rValue, 0);
-    const pnl = list.reduce((acc, t) => acc + t.pnlValue, 0);
-    return {
-      count: list.length,
-      winRate: wr,
-      netR: `${r >= 0 ? '+' : ''}${r.toFixed(1)}R`,
-      pnl: `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)}`,
-      bar: Math.min(100, Math.max(10, list.length * 15)),
-    };
+  const performanceTrades = filteredTrades.filter((trade) => trade.tradeStatus !== 'OPEN' && trade.pnlAvailable !== false && ['WIN', 'LOSS', 'BE'].includes(trade.outcome));
+  const wins = performanceTrades.filter((trade) => trade.outcome === 'WIN');
+  const losses = performanceTrades.filter((trade) => trade.outcome === 'LOSS');
+  const breakeven = performanceTrades.filter((trade) => trade.outcome === 'BE');
+  const winRate = performanceTrades.length ? ((wins.length / performanceTrades.length) * 100).toFixed(1) : null;
+  const journalTrades = filteredTrades.filter((trade) => trade.source !== 'MYFXBOOK' && trade.tradeStatus !== 'OPEN');
+  const fullDlmTrades = journalTrades.filter((trade) => trade.disciplineScore === 100);
+  const rWins = wins.filter((trade) => trade.rValueAvailable !== false);
+  const rLosses = losses.filter((trade) => trade.rValueAvailable !== false);
+  const avgWinR = rWins.length ? '+' + (rWins.reduce((sum, trade) => sum + trade.rValue, 0) / rWins.length).toFixed(2) + 'R' : '--';
+  const avgLossR = rLosses.length ? '-' + (Math.abs(rLosses.reduce((sum, trade) => sum + trade.rValue, 0)) / rLosses.length).toFixed(2) + 'R' : '--';
+  const netProfit = performanceTrades.reduce((sum, trade) => sum + trade.pnlValue, 0);
+  const formatMoney = (value: number) => {
+    try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD', signDisplay: 'always', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value); }
+    catch { return (value >= 0 ? '+' : '−') + Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (currency ? ' ' + currency : ''); }
   };
 
+  const overlapTrades = performanceTrades.filter((trade) => trade.session.includes('Overlap'));
+  const londonTrades = performanceTrades.filter((trade) => trade.session.includes('London') && !trade.session.includes('Overlap'));
+  const nyTrades = performanceTrades.filter((trade) => trade.session.includes('NY') && !trade.session.includes('Overlap'));
+
+  const getSessionStats = (list: TradeExecution[]) => {
+    const listWins = list.filter((trade) => trade.outcome === 'WIN').length;
+    const outcomes = list.filter((trade) => ['WIN', 'LOSS', 'BE'].includes(trade.outcome));
+    const rTrades = list.filter((trade) => trade.rValueAvailable !== false);
+    const pnlTrades = list.filter((trade) => trade.pnlAvailable !== false);
+    const r = rTrades.reduce((sum, trade) => sum + trade.rValue, 0);
+    const pnl = pnlTrades.reduce((sum, trade) => sum + trade.pnlValue, 0);
+    return { count: list.length, winRate: outcomes.length ? ((listWins / outcomes.length) * 100).toFixed(1) + '%' : '--', netR: rTrades.length ? (r >= 0 ? '+' : '') + r.toFixed(1) + 'R' : '—', pnl: pnlTrades.length ? formatMoney(pnl) : 'Unavailable', bar: outcomes.length ? Math.min(100, Math.max(10, outcomes.length * 15)) : 0 };
+  };
   const overlapStats = getSessionStats(overlapTrades);
   const londonStats = getSessionStats(londonTrades);
   const nyStats = getSessionStats(nyTrades);
@@ -90,9 +84,9 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
           </div>
           <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2.5">
             {[
-              { label: 'Win rate', value: winRate === null ? '—' : `${winRate}%`, detail: `${wins.length} wins · ${losses.length} losses · ${filteredTrades.length - wins.length - losses.length} break even`, tint: 'text-cyan-200' },
-              { label: 'Net profit', value: filteredTrades.length ? `${netProfit < 0 ? '−' : '+'}$${Math.abs(netProfit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—', detail: 'Filtered recorded results', tint: netProfit < 0 ? 'text-rose-300' : 'text-emerald-300' },
-              { label: 'Total trades', value: filteredTrades.length.toLocaleString(), detail: 'Included in this summary', tint: 'text-white' },
+              { label: 'Win rate', value: winRate === null ? '—' : `${winRate}%`, detail: `${wins.length} wins · ${losses.length} losses · ${breakeven.length} break even`, tint: 'text-cyan-200' },
+              { label: 'Net profit', value: performanceTrades.length ? formatMoney(netProfit) : '—', detail: 'Filtered recorded results', tint: netProfit < 0 ? 'text-rose-300' : 'text-emerald-300' },
+              { label: 'Total trades', value: performanceTrades.length.toLocaleString(), detail: 'Completed results with reported P&L', tint: 'text-white' },
               { label: 'Average winner / loser', value: `${avgWinR} / ${avgLossR}`, detail: 'Recorded R multiples', tint: 'text-violet-200' },
             ].map((metric) => (
               <div key={metric.label} className="min-w-0 rounded-xl border border-white/[.07] bg-[#070b16]/60 p-3 sm:p-3.5">
@@ -105,6 +99,7 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
         </div>
       </section>
 
+      {activityLoading && <p role="status" className="rounded-xl border border-violet-300/15 bg-violet-500/[.05] px-4 py-3 text-xs text-violet-200">Loading history for the selected Myfxbook account…</p>}{activityError && <p role="alert" className="rounded-xl border border-amber-300/15 bg-amber-500/[.05] px-4 py-3 text-xs text-amber-100">{activityError}</p>}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
         <div className="overview-panel p-4 sm:p-5 xl:col-span-7">
           <span className="font-headline-sm text-base font-bold text-white block mb-1">
@@ -147,7 +142,7 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
                 <div className="w-full h-2 bg-[#090b11] rounded-full overflow-hidden p-0.5 border border-white/[0.06]">
                   <div
                     className={`h-full bg-gradient-to-r ${row.color} rounded-full`}
-                    style={{ width: `${row.stats.count > 0 ? row.stats.bar : 4}%` }}
+                    style={{ width: `${row.stats.bar}%` }}
                   />
                 </div>
               </div>
@@ -177,7 +172,7 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
                   </span>
                 </div>
                 <p className="font-body-sm text-xs text-slate-300 mt-1.5">
-                  {fullDlmTrades.length} logged setups • High execution discipline
+                  {fullDlmTrades.length ? fullDlmTrades.length + ' logged setups' : 'Journal setup data is not available for these records'}
                 </p>
               </div>
 
@@ -187,24 +182,18 @@ export const AnalyticsScreen: React.FC<{ trades: TradeExecution[] }> = ({ trades
                     B- Early Anticipation (&lt;6 Rules)
                   </span>
                   <span className="font-label-numeric-md text-sm font-bold text-rose-400 tabular-nums">
-                      {filteredTrades.filter((t) => t.disciplineScore < 100).length > 0
-                      ? `-$${Math.abs(
-                          filteredTrades
-                            .filter((t) => t.disciplineScore < 100)
-                            .reduce((acc, t) => acc + t.pnlValue, 0)
-                        ).toFixed(2)} Net`
-                      : '$0.00 Lost'}
+                      {journalTrades.some((trade) => trade.disciplineScore < 100) ? formatMoney(journalTrades.filter((trade) => trade.disciplineScore < 100).reduce((sum, trade) => sum + trade.pnlValue, 0)) + ' Net' : 'No journal data'}
                   </span>
                 </div>
                 <p className="font-body-sm text-xs text-slate-300 mt-1.5">
-                  {filteredTrades.filter((t) => t.disciplineScore < 100).length} recorded trades below full checklist compliance
+                  {journalTrades.filter((trade) => trade.disciplineScore < 100).length} recorded trades below full checklist compliance
                 </p>
               </div>
             </div>
           </div>
 
           <div className="mt-4 rounded-xl border border-violet-400/15 bg-violet-500/[.06] p-3.5 text-xs text-violet-100">
-            <span className="font-bold">Filtered realized P&amp;L:</span> ${netProfit.toFixed(2)} across {filteredTrades.length} recorded trades. Open-position results are not included.
+            <span className="font-bold">Filtered realized P&amp;L:</span> {performanceTrades.length ? formatMoney(netProfit) + ' across ' + performanceTrades.length + ' completed trades.' : 'Unavailable for this selection.'} Open-position results are not included.
           </div>
         </div>
       </div>
@@ -228,8 +217,7 @@ export const AccountsScreen: React.FC<{
   onSyncPastTrades: (id: string, count?: number) => Promise<void> | void;
   onOpenImportModal?: (account: PropAccount) => void;
   onNavigateToJournal?: (accountId?: string) => void;
-  myfxbook: { data: MyfxbookAccountsResponse | null; loading: boolean; error: MyfxbookRequestError | null };
-  onRefreshMyfxbook: () => void;
+  onViewDetails?: (accountId: string) => void;
 }> = ({
   accounts,
   activeAccountId,
@@ -245,8 +233,7 @@ export const AccountsScreen: React.FC<{
   onSyncPastTrades,
   onOpenImportModal,
   onNavigateToJournal,
-  myfxbook,
-  onRefreshMyfxbook,
+  onViewDetails,
 }) => {
   const [accountToDelete, setAccountToDelete] = useState<PropAccount | null>(null);
   const [inspectingAccount, setInspectingAccount] = useState<PropAccount | null>(null);
@@ -361,8 +348,6 @@ export const AccountsScreen: React.FC<{
         </div>
       </section>
 
-      <MyfxbookAccountsPanel {...myfxbook} onRefresh={onRefreshMyfxbook}/>
-
       {/* Account Cards Grid or Empty State */}
       {accounts.length === 0 ? (
         <div className="overview-panel flex flex-col items-center justify-center p-8 text-center sm:p-12">
@@ -388,6 +373,22 @@ export const AccountsScreen: React.FC<{
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-3 xl:gap-4">
           {accounts.map((acc) => {
             const isActive = acc.id === activeAccountId;
+            if (acc.source === 'MYFXBOOK') {
+              const amount = (value: number | undefined) => {
+                if (value === undefined) return 'Unavailable';
+                try { return acc.currency ? new Intl.NumberFormat('en-US', { style: 'currency', currency: acc.currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+                catch { return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (acc.currency ? ' ' + acc.currency : ''); }
+              };
+              return <article key={acc.id} className={'overview-account-card relative flex flex-col justify-between ' + (isActive ? 'active' : '')}>
+                <div><div className='mb-3 flex items-center justify-between'><span className='rounded-full border border-cyan-300/20 bg-cyan-300/[.06] px-2.5 py-1 text-[9px] font-bold uppercase text-cyan-200'>{acc.accountType || 'Myfxbook'}</span>{isActive && <span className='rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-1 text-[9px] text-violet-200'>ACTIVE</span>}</div>
+                <h3 className='truncate text-base font-bold text-white'>{acc.name}</h3><p className='mt-1 truncate text-xs text-slate-400'>Myfxbook · {acc.ref}</p>
+                <div className='my-4 grid grid-cols-2 gap-3'><div className='terminal-glass-subtle min-w-0 rounded-xl border border-white/[.05] p-3'><span className='text-[9px] uppercase text-slate-400'>Balance</span><p className='mt-1 truncate text-sm font-bold text-white'>{amount(acc.balanceAvailable === false ? undefined : acc.currentBalance)}</p></div><div className='terminal-glass-subtle min-w-0 rounded-xl border border-white/[.05] p-3'><span className='text-[9px] uppercase text-slate-400'>Equity</span><p className='mt-1 truncate text-sm font-bold text-cyan-100'>{amount(acc.equityAvailable === false ? undefined : acc.liveEquity)}</p></div></div>
+                <p className='mb-4 text-[10px] text-slate-500'>{acc.currency || 'Currency unavailable'} · read only</p></div>
+                <button type='button' onClick={() => onSelectAccount(acc.id)} className='min-h-9 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 hover:bg-violet-500/20'>{isActive ? 'Active account' : 'Set as active'}</button>
+                {onViewDetails && <button type='button' onClick={() => onViewDetails(acc.id)} className='mt-2 min-h-9 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300'>View details</button>}
+                {onNavigateToJournal && <button type='button' onClick={() => onNavigateToJournal(acc.id)} className='mt-2 min-h-9 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300'>View history</button>}
+              </article>;
+            }
             const pct = Math.min(
               100,
               acc.targetProfit > 0
@@ -642,18 +643,18 @@ export const AccountsScreen: React.FC<{
         const challenge = detail.accountSettings?.challenge;
         const detailTrades = trades.filter((trade) => trade.accountId === detail.id && ['WIN', 'LOSS', 'BE'].includes(trade.outcome));
         const detailRealized = detailTrades.reduce((sum, trade) => sum + (Number(trade.pnlValue) || 0), 0);
-        const category = detail.classification === 'LIVE_BROKERAGE' ? 'LIVE BROKERAGE' : detail.classification === 'DEMO' ? 'DEMO' : 'PROP FIRM';
+        const category = detail.classification === 'LIVE_BROKERAGE' ? 'LIVE BROKERAGE' : detail.classification === 'DEMO' ? 'DEMO' : detail.classification === 'PROP_FIRM' ? 'PROP FIRM' : detail.accountType?.toUpperCase() || 'ACCOUNT';
         return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsAccountId(null); }}>
           <section className="terminal-glass max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-blue-300/15 p-5 shadow-2xl sm:p-7" role="dialog" aria-modal="true" aria-label={`${detail.name} details`}>
             <div className="flex items-start justify-between gap-3 border-b border-white/[.08] pb-4"><div><p className="font-label-tech text-[10px] uppercase tracking-[.2em] text-violet-300">Account details</p><h2 className="mt-1 text-xl font-semibold text-white">{detail.name}</h2><div className="mt-2 flex flex-wrap gap-2"><span className="rounded-full border border-violet-400/25 bg-violet-400/10 px-2.5 py-1 text-[10px] font-bold text-violet-200">{category}</span>{category === 'PROP FIRM' && challenge?.stage && <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-bold text-cyan-200">{challenge.stage.replaceAll('_', ' ')}</span>}</div></div><button type="button" onClick={() => setDetailsAccountId(null)} aria-label="Close account details" className="rounded-lg border border-white/10 px-3 py-2 text-slate-400">×</button></div>
             <div className="grid gap-3 py-4 sm:grid-cols-2">{[
-              ['Provider', detail.provider || 'Unavailable'], ['Account ID', detail.shortRef], ['Connection', detail.connectionStatus || 'Unavailable'], ['MT5 mode', detail.connectionMode || 'Not supplied by connector'], ['Current balance', `${detail.currency || ''} ${detail.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Current equity', `${detail.currency || ''} ${detail.liveEquity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Original starting balance', `${detail.currency || ''} ${detail.baseBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Balance change since start', `${detail.currency || ''} ${detail.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}`], ['Recorded closed trades', detail.tradeCount ?? detailTrades.length], ['Recorded realized P&L', `${detail.currency || ''} ${detailRealized.toLocaleString('en-US', { minimumFractionDigits: 2 })}`],
+              ['Provider', detail.provider || 'Unavailable'], ['Account ID', detail.shortRef], ['Connection', detail.connectionStatus || 'Unavailable'], ['MT5 mode', detail.connectionMode || 'Not supplied by connector'], ['Current balance', detail.balanceAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Current equity', detail.equityAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.liveEquity.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Original starting balance', detail.startingBalanceAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.baseBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })], [detail.source === 'MYFXBOOK' ? 'Provider reported profit' : 'Balance change since start', detail.profitAvailable === false ? 'Unavailable' : (detail.currency ? detail.currency + ' ' : '') + detail.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })], ['Recorded closed trades', detail.tradeCount ?? detailTrades.length], ['Recorded realized P&L', `${detail.currency || ''} ${detailRealized.toLocaleString('en-US', { minimumFractionDigits: 2 })}`],
             ].map(([label, value]) => <div key={label} className="rounded-xl border border-white/[.07] bg-black/15 p-3"><span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span><strong className="mt-1 block break-words text-sm text-slate-100">{value}</strong></div>)}</div>
             {category === 'PROP FIRM' && <div className="mb-4 rounded-xl border border-violet-400/15 bg-violet-400/[.025] p-4"><h3 className="text-sm font-semibold text-white">Configured challenge settings</h3><p className="mt-1 text-[11px] text-slate-400">User-provided references only; NOVA does not verify or enforce the firm's rules.</p><div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-300 sm:grid-cols-3">{[
               ['Firm', detail.accountSettings?.prop_firm_name || detail.provider || 'Not configured'], ['Type', challenge?.type?.replaceAll('_', ' ') || 'Not configured'], ['Stage', challenge?.stage?.replaceAll('_', ' ') || 'Not configured'], ['Challenge size', challenge?.size != null ? `${detail.currency || ''} ${challenge.size}` : 'Not configured'], ['Purchase fee', challenge?.fee != null ? `${detail.currency || ''} ${challenge.fee}` : 'Not configured'], ['Phase 1 target', challenge?.phase1_target_percent != null ? `${challenge.phase1_target_percent}%` : 'Not configured'], ['Phase 2 target', challenge?.phase2_target_percent != null ? `${challenge.phase2_target_percent}%` : 'Not configured'], ['Daily drawdown', challenge?.daily_drawdown_percent != null ? `${challenge.daily_drawdown_percent}%` : 'Not configured'], ['Max drawdown', challenge?.max_drawdown_percent != null ? `${challenge.max_drawdown_percent}%` : 'Not configured'],
             ].map(([label, value]) => <p key={label}><span className="block text-[9px] uppercase tracking-wider text-slate-500">{label}</span><strong className="mt-1 block">{value}</strong></p>)}</div></div>}
             {detail.accountSettings?.notes && <p className="mb-4 rounded-xl border border-white/[.07] p-3 text-sm text-slate-300">{detail.accountSettings.notes}</p>}
-            <div className="flex flex-wrap justify-between gap-3 border-t border-white/[.08] pt-4"><button type="button" onClick={() => { setAccountToDelete(detail); setDetailsAccountId(null); }} className="rounded-lg border border-rose-500/25 px-4 py-2.5 text-sm text-rose-200">Remove Account</button><div className="ml-auto flex gap-2"><button type="button" onClick={() => setDetailsAccountId(null)} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300">Close</button><button type="button" onClick={() => { setEditingAccount(detail); setDetailsAccountId(null); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white">Edit Account</button></div></div>
+            <div className="flex flex-wrap justify-end gap-3 border-t border-white/[.08] pt-4">{detail.source !== 'MYFXBOOK' && <button type="button" onClick={() => { setAccountToDelete(detail); setDetailsAccountId(null); }} className="rounded-lg border border-rose-500/25 px-4 py-2.5 text-sm text-rose-200">Remove Account</button>}<div className="ml-auto flex gap-2"><button type="button" onClick={() => setDetailsAccountId(null)} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300">Close</button>{detail.source !== 'MYFXBOOK' && <button type="button" onClick={() => { setEditingAccount(detail); setDetailsAccountId(null); }} className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white">Edit Account</button>}</div></div>
           </section>
         </div>;
       })()}

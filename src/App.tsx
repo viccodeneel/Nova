@@ -27,8 +27,7 @@ import { NovaOrbDock } from './components/NovaOrbDock';
 import { NetWorthScreen } from './components/NetWorthScreen';
 import { Avatar, SettingsPanel, type Profile } from './components/SettingsPanel';
 import { ApiClient } from './services/apiClient.ts';
-import { MyfxbookAccountsPanel } from './components/MyfxbookAccountsPanel';
-import { MyfxbookAccountsResponse, MyfxbookRequestError } from './services/myfxbookAccounts';
+import { mapMyfxbookAccountToDashboard, mapMyfxbookActivityToTrades, resolveActiveAccount, tradesForAccount, MyfxbookAccountsResponse, MyfxbookRequestError } from './services/myfxbookAccounts';
 
 const NAV_ITEMS: Array<{
   id: NavSection;
@@ -159,6 +158,7 @@ export default function App() {
   // Load from localStorage or defaults
   const [accounts, setAccounts] = useState<PropAccount[]>([]);
   const [myfxbook, setMyfxbook] = useState<{ data: MyfxbookAccountsResponse | null; loading: boolean; error: MyfxbookRequestError | null }>({ data: null, loading: false, error: null });
+  const [myfxbookActivity, setMyfxbookActivity] = useState<Record<string, { trades: TradeExecution[]; loading: boolean; error: MyfxbookRequestError | null }>>({});
 
   const [activeAccountId, setActiveAccountId] = useState<string>('');
   const [isConnectAccountOpen, setIsConnectAccountOpen] = useState(false);
@@ -189,19 +189,33 @@ export default function App() {
     if (!authToken) return;
     ApiClient.getProfile().then(setProfile).catch(() => undefined);
   }, [authToken]);
-  const refreshMyfxbook = async () => {
-    const requestToken = authTokenRef.current;
-    if (!requestToken) return;
-    setMyfxbook((current) => ({ ...current, loading: true, error: null }));
-    try {
-      const data = await ApiClient.getMyfxbookAccounts();
-      if (authTokenRef.current !== requestToken) return;
-      setMyfxbook({ data, loading: false, error: null });
-    } catch (error) {
-      if (authTokenRef.current !== requestToken) return;
-      setMyfxbook((current) => ({ ...current, loading: false, error: error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook could not provide account data.') }));
-    }
-  };
+  const myfxbookAccounts = (myfxbook.data?.accounts || []).map(mapMyfxbookAccountToDashboard);
+  const selectableAccounts = [...accounts, ...myfxbookAccounts];
+  const activeAccount = resolveActiveAccount(selectableAccounts, activeAccountId);
+  const allDashboardTrades = [...trades, ...Object.values(myfxbookActivity).flatMap((entry) => entry.trades)];
+  const activeTrades = tradesForAccount(allDashboardTrades, activeAccount?.id);
+  const selectedMyfxbookActivity = activeAccount?.source === 'MYFXBOOK' ? myfxbookActivity[activeAccount.id] : undefined;
+  const selectAccount = (id: string) => { setActiveAccountId(id); setSelectedTrade(null); };
+  useEffect(() => {
+    if (!activeAccount || activeAccount.source !== 'MYFXBOOK' || !activeAccount.providerAccountId || !authToken) return;
+    let stopped = false;
+    const account = activeAccount;
+    const providerAccountId = account.providerAccountId;
+    if (!providerAccountId) return;
+    setMyfxbookActivity((current) => ({ ...current, [account.id]: { trades: [], loading: true, error: null } }));
+    ApiClient.getMyfxbookActivity(providerAccountId).then((activity) => {
+      if (stopped) return;
+      const mappedTrades = mapMyfxbookActivityToTrades(account, activity);
+      setMyfxbookActivity((current) => ({ ...current, [account.id]: { trades: mappedTrades, loading: false, error: null } }));
+    }).catch((error) => {
+      if (stopped) return;
+      setMyfxbookActivity((current) => ({ ...current, [account.id]: { trades: current[account.id]?.trades || [], loading: false, error: error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook history is unavailable.') } }));
+    });
+    return () => { stopped = true; };
+  }, [activeAccountId, authToken, myfxbook.data]);
+  useEffect(() => {
+    if (!selectableAccounts.some((account) => account.id === activeAccountId) && selectableAccounts.length) setActiveAccountId(selectableAccounts[0].id);
+  }, [activeAccountId, accounts, myfxbook.data]);
   useEffect(() => {
     if (!authToken) {
       setMyfxbook({ data: null, loading: false, error: null });
@@ -222,10 +236,10 @@ export default function App() {
   }, [authToken]);
   const handleGoalChange = async (goal: number | null) => setProfile(await ApiClient.updateProfile({ networth_goal: goal }));
   // One NOVA engine for the whole app: conversations survive tab changes and the wake word works anywhere.
-  const nova = useNovaVoice({ enabled: Boolean(authToken), onNavigate: setActiveNav, getAccountId: () => activeAccountId, getActiveTab: () => activeNav });
+  const nova = useNovaVoice({ enabled: Boolean(authToken), onNavigate: setActiveNav, getAccountId: () => activeAccount?.source === 'MYFXBOOK' ? '' : activeAccountId, getActiveTab: () => activeNav });
   const livekitVoice = useLiveKitVoice({
     authenticated: Boolean(authToken),
-    accountId: activeAccountId || undefined,
+    accountId: activeAccount?.source === 'MYFXBOOK' ? undefined : activeAccountId || undefined,
     onConnecting: nova.suspendBrowserVoice,
     onDisconnected: nova.resumeBrowserVoice,
     onNavigate: async (page) => {
@@ -250,6 +264,7 @@ export default function App() {
       setActiveAccountId('');
       setTrades([]);
       setMyfxbook({ data: null, loading: false, error: null });
+      setMyfxbookActivity({});
     };
     window.addEventListener('nova:auth-expired', clearSession);
     return () => window.removeEventListener('nova:auth-expired', clearSession);
@@ -263,7 +278,7 @@ export default function App() {
         const connectedAccounts = backendAccounts;
         const mapped = connectedAccounts.map(mapBackendAccount);
         setAccounts(mapped);
-        setActiveAccountId(mapped[0]?.id || '');
+        setActiveAccountId((current) => current || mapped[0]?.id || '');
         if (connectedAccounts[0]) {
           const account = connectedAccounts[0];
           setMt5Config({
@@ -336,7 +351,7 @@ export default function App() {
           const mappedAccounts = connectedAccounts.map(mapBackendAccount);
           setAccounts(mappedAccounts);
           setActiveAccountId((currentId) =>
-            mappedAccounts.some((account) => account.id === currentId)
+            mappedAccounts.some((account) => account.id === currentId) || currentId.startsWith('myfxbook:')
               ? currentId
               : mappedAccounts[0]?.id ?? ''
           );
@@ -402,8 +417,6 @@ export default function App() {
     return `${hrs}:${mins}:${secs}`;
   };
 
-  const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0];
-
   const handleSignOut = () => {
     setActiveNav('ai');
     sessionStorage.removeItem('nova_session');
@@ -412,6 +425,7 @@ export default function App() {
     setActiveAccountId('');
     setTrades([]);
     setMyfxbook({ data: null, loading: false, error: null });
+    setMyfxbookActivity({});
   };
 
   const handleLocalAccountConnected = async () => {
@@ -596,6 +610,19 @@ export default function App() {
   };
 
   const handleSyncFromHeader = async (requestedAccountId?: string) => {
+    const myfxAccount = selectableAccounts.find((account) => account.id === requestedAccountId && account.source === 'MYFXBOOK');
+    if (myfxAccount?.providerAccountId) {
+      setIsSyncing(true);
+      try {
+        const activity = await ApiClient.getMyfxbookActivity(myfxAccount.providerAccountId);
+        setMyfxbookActivity((current) => ({ ...current, [myfxAccount.id]: { trades: mapMyfxbookActivityToTrades(myfxAccount, activity), loading: false, error: null } }));
+        setSyncToast({ success: true, message: `${myfxAccount.name} history refreshed from Myfxbook.` });
+      } catch (error) {
+        setMyfxbookActivity((current) => ({ ...current, [myfxAccount.id]: { trades: current[myfxAccount.id]?.trades || [], loading: false, error: error instanceof MyfxbookRequestError ? error : new MyfxbookRequestError('Myfxbook history is unavailable.') } }));
+        setSyncToast({ success: false, message: 'Myfxbook history could not be refreshed.' });
+      } finally { setIsSyncing(false); setTimeout(() => setSyncToast(null), 5000); }
+      return;
+    }
     setIsSyncing(true);
     try {
       const res = await ApiClient.syncLocalConnector();
@@ -710,12 +737,12 @@ export default function App() {
           </header>
           <main className="min-h-screen px-4 pb-28 pt-[94px] sm:px-6 xl:px-5">
             <div key={activeNav} className="nova-enter">
-              {activeNav === 'overview' && <div className="overview-shell"><section className="empty-dashboard-hero"><div><p className="overview-eyebrow"><span className="status-dot"/>NOVA · READY WHEN YOU ARE</p><p className="overview-value-label">Your dashboard is ready</p><h2 className="overview-value">A clearer view<br/>starts here.</h2><p className="overview-hero-sub">Connect a supported account to see your actual balance, equity, and trading performance.</p><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="empty-connect-button"><span className="material-symbols-outlined">add</span>Connect an account</button></div><div className="empty-dashboard-note"><span className="material-symbols-outlined">shield</span><strong>Real data only</strong><p>NOVA won’t show sample balances or invented trade history.</p></div></section><div className="overview-top-grid"><section className="overview-panel account-overview-panel"><div className="overview-panel-head"><div><h3>No accounts connected</h3><p>Once linked, your account summaries will appear here.</p></div></div><div className="overview-empty"><span className="material-symbols-outlined">account_balance</span><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}>Connect your first account <ChevronRight size={14}/></button></div></section><section className="overview-panel quick-actions-panel"><div className="overview-panel-head"><div><h3>Quick actions</h3><p>Explore your workspace</p></div></div><div className="overview-action-list"><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}><span className="action-icon violet"><span className="material-symbols-outlined">add</span></span><span><strong>Connect account</strong><small>Link a supported trading account</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('trade-journal')}><span className="action-icon blue"><span className="material-symbols-outlined">book</span></span><span><strong>Open journal</strong><small>Review recorded trades</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('analytics')}><span className="action-icon cyan"><span className="material-symbols-outlined">analytics</span></span><span><strong>Analyze performance</strong><small>Explore your trading analytics</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('finance')}><span className="action-icon green"><span className="material-symbols-outlined">account_balance_wallet</span></span><span><strong>View net worth</strong><small>Open your wealth tracker</small></span><ChevronRight size={15}/></button></div></section></div><MyfxbookAccountsPanel {...myfxbook} onRefresh={refreshMyfxbook}/></div>}
-              {activeNav === 'accounts' && (isConnectAccountOpen ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} /> : <div className="overview-shell"><section className="overview-panel p-6"><h2 className="text-lg font-semibold text-white">No MT5 accounts connected</h2><button type="button" onClick={() => setIsConnectAccountOpen(true)} className="mt-3 text-sm text-violet-300">Connect account</button></section><MyfxbookAccountsPanel {...myfxbook} onRefresh={refreshMyfxbook}/></div>)}
-              {activeNav === 'trade-journal' && <TradeJournalScreen trades={trades} selectedTrade={selectedTrade} accounts={accounts} activeAccountId="" onSelectAccount={() => undefined} onSelectTrade={setSelectedTrade} onAddTrade={handleAddTrade} onDeleteTrade={handleDeleteTrade} />}
+              {activeNav === 'overview' && <div className="overview-shell"><section className="empty-dashboard-hero"><div><p className="overview-eyebrow"><span className="status-dot"/>NOVA · READY WHEN YOU ARE</p><p className="overview-value-label">Your dashboard is ready</p><h2 className="overview-value">A clearer view<br/>starts here.</h2><p className="overview-hero-sub">Connect a supported account to see your actual balance, equity, and trading performance.</p><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} className="empty-connect-button"><span className="material-symbols-outlined">add</span>Connect an account</button></div><div className="empty-dashboard-note"><span className="material-symbols-outlined">shield</span><strong>Real data only</strong><p>NOVA won’t show sample balances or invented trade history.</p></div></section><div className="overview-top-grid"><section className="overview-panel account-overview-panel"><div className="overview-panel-head"><div><h3>No accounts connected</h3><p>Once linked, your account summaries will appear here.</p></div></div><div className="overview-empty"><span className="material-symbols-outlined">account_balance</span><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}>Connect your first account <ChevronRight size={14}/></button></div></section><section className="overview-panel quick-actions-panel"><div className="overview-panel-head"><div><h3>Quick actions</h3><p>Explore your workspace</p></div></div><div className="overview-action-list"><button type="button" onClick={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }}><span className="action-icon violet"><span className="material-symbols-outlined">add</span></span><span><strong>Connect account</strong><small>Link a supported trading account</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('trade-journal')}><span className="action-icon blue"><span className="material-symbols-outlined">book</span></span><span><strong>Open journal</strong><small>Review recorded trades</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('analytics')}><span className="action-icon cyan"><span className="material-symbols-outlined">analytics</span></span><span><strong>Analyze performance</strong><small>Explore your trading analytics</small></span><ChevronRight size={15}/></button><button type="button" onClick={() => setActiveNav('finance')}><span className="action-icon green"><span className="material-symbols-outlined">account_balance_wallet</span></span><span><strong>View net worth</strong><small>Open your wealth tracker</small></span><ChevronRight size={15}/></button></div></section></div><div className="overview-panel p-5 text-xs text-slate-400">No NOVA trading accounts are connected yet.</div></div>}
+              {activeNav === 'accounts' && (isConnectAccountOpen ? <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => { setActiveNav('overview'); setIsConnectAccountOpen(false); }} /> : <div className="overview-shell"><section className="overview-panel p-6"><h2 className="text-lg font-semibold text-white">No MT5 accounts connected</h2><button type="button" onClick={() => setIsConnectAccountOpen(true)} className="mt-3 text-sm text-violet-300">Connect account</button></section>{myfxbook.loading ? <p className="text-xs text-slate-500">Loading available accounts…</p> : myfxbook.error ? <p role="status" className="text-xs text-amber-200">Myfxbook account data is unavailable.</p> : <p className="text-xs text-slate-500">No connected trading accounts were returned.</p>}</div>)}
+              {activeNav === 'trade-journal' && <TradeJournalScreen trades={trades} selectedTrade={selectedTrade} accounts={selectableAccounts} activeAccountId={undefined} onSelectAccount={selectAccount} currency={profile.currency} activityLoading={false} onSelectTrade={setSelectedTrade} onAddTrade={handleAddTrade} onDeleteTrade={handleDeleteTrade} />}
               {activeNav === 'ai' && <AiScreen mt5="NONE" name={profile.display_name} nova={nova} livekit={livekitVoice} />}
               {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
-              {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
+              {activeNav === 'analytics' && <AnalyticsScreen trades={[]} currency={profile.currency} activityLoading={false} />}
               {activeNav === 'settings' && <SettingsPanel wake={wakeProps} profile={profile} onProfileChange={setProfile} accounts={accounts} onDeleteAccount={handleDeleteAccount} onConnect={() => { setActiveNav('accounts'); setIsConnectAccountOpen(true); }} onSignOut={import.meta.env.DEV ? undefined : handleSignOut} />}
             </div>
           </main>
@@ -1002,7 +1029,7 @@ export default function App() {
                 <div className="absolute right-0 top-12 w-80 terminal-glass rounded-xl p-3.5 border border-white/15 z-50 shadow-2xl">
                   <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10">
                     <span className="font-label-tech text-[10px] text-slate-400 uppercase font-semibold">
-                      Connected MT5 Accounts ({accounts.length})
+                      Trading Accounts ({selectableAccounts.length})
                     </span>
                     <button
                       type="button"
@@ -1013,9 +1040,9 @@ export default function App() {
                     </button>
                   </div>
                   <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto pr-1">
-                    {accounts.map((acc) => {
+                    {selectableAccounts.map((acc) => {
                       const isActive = acc.id === activeAccount.id;
-                      const accTradesCount = trades.filter((t) => t.accountId === acc.id).length;
+                      const accTradesCount = allDashboardTrades.filter((t) => t.accountId === acc.id).length;
                       return (
                         <div
                           key={acc.id}
@@ -1027,7 +1054,7 @@ export default function App() {
                         >
                           <div
                             onClick={() => {
-                              setActiveAccountId(acc.id);
+                              selectAccount(acc.id);
                               setShowProfileMenu(false);
                             }}
                             className="cursor-pointer flex-1 mr-2"
@@ -1036,14 +1063,14 @@ export default function App() {
                               {acc.name}
                             </span>
                             <span className="font-label-numeric-sm text-[10px] text-slate-400">
-                              {acc.ref} • {accTradesCount} trades
+                              {acc.source === 'MYFXBOOK' ? 'Myfxbook' : acc.ref} • {accTradesCount} trades
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="font-label-numeric-sm text-xs text-emerald-400 font-bold tabular-nums">
-                              ${acc.currentBalance.toLocaleString('en-US')}
+                              {acc.balanceAvailable === false ? 'Unavailable' : new Intl.NumberFormat('en-US', { style: 'currency', currency: acc.currency || 'USD' }).format(acc.currentBalance)}
                             </span>
-                            {(
+                            {acc.source !== 'MYFXBOOK' && (
                               <button
                                 type="button"
                                 title="Delete account"
@@ -1083,8 +1110,8 @@ export default function App() {
           {activeNav === 'overview' && (
             <OverviewScreen
               activeAccount={activeAccount}
-              accounts={accounts}
-              trades={trades}
+              accounts={selectableAccounts}
+              trades={allDashboardTrades}
               onSync={() => void handleSyncFromHeader(activeAccount.id)}
               onOpenImportModal={() => {
                 setTargetImportAccount(activeAccount);
@@ -1095,20 +1122,20 @@ export default function App() {
               onNavigateToAnalytics={() => setActiveNav('analytics')}
               onNavigateToFinance={() => setActiveNav('finance')}
               onNavigateToSettings={() => setActiveNav('settings')}
-              onSelectAccount={(id) => setActiveAccountId(id)}
-              onOpenAccountDetails={(id) => { setActiveNav('accounts'); setIsConnectAccountOpen(false); setAccountDetailsId(id); }}
-              myfxbook={myfxbook}
-              onRefreshMyfxbook={refreshMyfxbook}
+              onSelectAccount={selectAccount}
+              onOpenAccountDetails={(id) => { selectAccount(id); setActiveNav('accounts'); setIsConnectAccountOpen(false); setAccountDetailsId(id); }}
+              activityLoading={selectedMyfxbookActivity?.loading}
+              activityError={selectedMyfxbookActivity?.error?.message}
             />
           )}
 
           {activeNav === 'trade-journal' && (
             <TradeJournalScreen
-              trades={trades}
+              trades={activeTrades}
               selectedTrade={selectedTrade}
-              accounts={accounts}
+              accounts={[activeAccount]}
               activeAccountId={activeAccount.id}
-              onSelectAccount={(accId) => setActiveAccountId(accId)}
+              onSelectAccount={selectAccount}
               onSelectTrade={setSelectedTrade}
               onAddTrade={handleAddTrade}
               onDeleteTrade={handleDeleteTrade}
@@ -1117,24 +1144,24 @@ export default function App() {
                 setTargetImportAccount(activeAccount);
                 setIsImportModalOpen(true);
               }}
+              currency={activeAccount.currency}
+              activityLoading={selectedMyfxbookActivity?.loading}
+              activityError={selectedMyfxbookActivity?.error?.message}
             />
           )}
 
           {activeNav === 'ai' && <AiScreen mt5={linkState} name={profile.display_name} nova={nova} livekit={livekitVoice} />}
           {activeNav === 'finance' && <NetWorthScreen currency={profile.currency} goal={profile.networth_goal} onGoalChange={handleGoalChange} />}
-          {activeNav === 'analytics' && <AnalyticsScreen trades={trades} />}
+          {activeNav === 'analytics' && <AnalyticsScreen trades={activeTrades} currency={activeAccount.currency} />}
 
           {activeNav === 'accounts' && (
             isConnectAccountOpen ? (
               <ConnectAccountScreen onConnected={handleLocalAccountConnected} onCancel={() => setIsConnectAccountOpen(false)} />
             ) : <AccountsScreen
-              accounts={accounts}
+              accounts={selectableAccounts}
               activeAccountId={activeAccount.id}
-              trades={trades}
-              onSelectAccount={(id) => {
-                setActiveAccountId(id);
-                setActiveNav('overview');
-              }}
+              trades={allDashboardTrades}
+              onSelectAccount={(id) => { selectAccount(id); setActiveNav('overview'); }}
               onOpenConnectModal={() => setIsConnectAccountOpen(true)}
               onDeleteAccount={handleDeleteAccount}
               onUpdateAccount={handleUpdateAccount}
@@ -1148,11 +1175,10 @@ export default function App() {
                 setIsImportModalOpen(true);
               }}
               onNavigateToJournal={(accId) => {
-                if (accId) setActiveAccountId(accId);
+                if (accId) selectAccount(accId);
                 setActiveNav('trade-journal');
               }}
-              myfxbook={myfxbook}
-              onRefreshMyfxbook={refreshMyfxbook}
+              onViewDetails={(id) => { selectAccount(id); setAccountDetailsId(id); }}
             />
           )}
 
